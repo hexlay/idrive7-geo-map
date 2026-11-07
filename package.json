@@ -1,0 +1,11 @@
+{
+  "name": "idrive7-geo-map",
+  "version": "1.0.0",
+  "description": "Offline OpenStreetMap navigation for BMW iDrive 7 (MGU)",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "python3 kit/tools/build.py",
+    "emu": "node kit/tools/emu.js"
+  }
+}

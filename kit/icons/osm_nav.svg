@@ -1,0 +1,44 @@
+<!-- accent: #2f8cff -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140">
+<defs>
+  <linearGradient id="n-chrome" x1="0" y1="0" x2="0.3" y2="1">
+    <stop offset="0" stop-color="#f7f9fb"/><stop offset="0.22" stop-color="#c4cbd3"/><stop offset="0.48" stop-color="#6c757f"/>
+    <stop offset="0.62" stop-color="#2e3339"/><stop offset="0.85" stop-color="#7d8790"/><stop offset="1" stop-color="#c9d0d7"/>
+  </linearGradient>
+  <radialGradient id="n-map" cx="0.45" cy="0.4" r="0.7">
+    <stop offset="0" stop-color="#2a3442"/><stop offset="0.75" stop-color="#151b24"/><stop offset="1" stop-color="#0b0f15"/>
+  </radialGradient>
+  <linearGradient id="n-route" x1="0" y1="1" x2="0" y2="0">
+    <stop offset="0" stop-color="#1a5fd0"/><stop offset="1" stop-color="#4aa3ff"/>
+  </linearGradient>
+  <linearGradient id="n-dart" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6dde6"/>
+  </linearGradient>
+  <clipPath id="n-clip"><circle cx="70" cy="70" r="50"/></clipPath>
+  <filter id="n-glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3"/></filter>
+</defs>
+<circle cx="70" cy="70" r="58" fill="url(#n-chrome)"/>
+<circle cx="70" cy="70" r="53" fill="#0a0d12"/>
+<circle cx="70" cy="70" r="50" fill="url(#n-map)"/>
+<g clip-path="url(#n-clip)">
+  <!-- water and a park -->
+  <path d="M96 14 C86 40 104 62 92 88 C84 104 96 118 104 130 L140 130 L140 10 Z" fill="#163049"/>
+  <path d="M22 96 L46 88 L54 110 L28 120 Z" fill="#1b3025"/>
+  <!-- streets -->
+  <g stroke="#5c6670" stroke-width="3" stroke-linecap="round" fill="none">
+    <path d="M16 54 L124 40"/><path d="M30 20 L44 124"/><path d="M14 80 L120 70"/><path d="M62 16 L74 124"/>
+  </g>
+  <!-- the route, a roundabout and the way on -->
+  <path d="M70 122 L70 86 A12 12 0 1 1 82 74 L112 60" stroke="#0a2856" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M70 122 L70 86 A12 12 0 1 1 82 74 L112 60" stroke="url(#n-route)" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M90 66.5 l5 3.5 l-5 3.5" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="rotate(-25 92 70)"/>
+</g>
+<!-- the car: a dart in a ring -->
+<circle cx="70" cy="100" r="15" fill="#2f8cff" filter="url(#n-glow)" opacity="0.8"/>
+<circle cx="70" cy="100" r="14" fill="#ffffff"/>
+<circle cx="70" cy="100" r="12" fill="#2f8cff"/>
+<path d="M70 90 L78 107 L70 103 L62 107 Z" fill="url(#n-dart)"/>
+<!-- a speed limit sign, BMW style -->
+<circle cx="102" cy="34" r="15" fill="#ffffff" stroke="#d0021b" stroke-width="4.5"/>
+<text x="102" y="39.5" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="14" text-anchor="middle" fill="#111111">60</text>
+</svg>

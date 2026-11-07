@@ -1,0 +1,284 @@
+{
+  "id": "osm_nav",
+  "title": "Navigation",
+  "description": "Offline OpenStreetMap navigation for Georgia (Georgian and English) in place of the BMW map: GPU map at 60 fps, turn-by-turn guidance, speed limits, and the console's NAV button",
+  "version": "1.0.0",
+  "vendor": "custom",
+  "loggingId": "OANV",
+  "iconGlyph": "nav",
+  "mguInternet": false,
+  "replacesStockNav": true,
+  "startWidget": {
+    "name": "Navigation",
+    "layout": "LT_Table_OnlineApps_DriveRecorderWidget",
+    "image": "BackgroundImage1",
+    "cells": {
+      "HeadlineText": [
+        "Navigation",
+        "Text"
+      ]
+    }
+  },
+  "mguHmi": [
+    "ID7"
+  ],
+  "maxDiskUsage": 268435456,
+  "memoryKB": 196608,
+  "signals": {
+    "de.bmw.infotainment.vehicle.Vehicle2": {
+      "statusCarSpeed2": "rs"
+    },
+    "de.bmw.infotainment.vehicle.CDS2": {
+      "statusLongitudinalAccelerationMassCenter": "rs",
+      "statusLateralAccelerationMassCenter": "rs"
+    },
+    "de.bmw.infrastructure.VehicleInformation": {
+      "statusGearboxDrive": "s",
+      "DataPowerTrain2": "s"
+    }
+  },
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "Navigation",
+      "buttons": [
+        [
+          "BTN_PAGE",
+          "Next page"
+        ],
+        [
+          "BTN_SETTINGS",
+          "Settings"
+        ]
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "mapStyle",
+      "label": "Map colours",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "Automatic (day / night)"
+        ],
+        [
+          "night",
+          "Night"
+        ],
+        [
+          "day",
+          "Day"
+        ]
+      ]
+    },
+    {
+      "key": "mapLang",
+      "label": "Map language",
+      "type": "choice",
+      "default": "ka",
+      "options": [
+        [
+          "ka",
+          "Georgian"
+        ],
+        [
+          "en",
+          "English"
+        ],
+        [
+          "both",
+          "Georgian and English"
+        ]
+      ]
+    },
+    {
+      "key": "orientation",
+      "label": "Map orientation",
+      "type": "choice",
+      "default": "heading",
+      "options": [
+        [
+          "heading",
+          "Heading up"
+        ],
+        [
+          "north",
+          "North up"
+        ]
+      ]
+    },
+    {
+      "key": "autoZoom",
+      "label": "Auto zoom",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "avoid",
+      "label": "Route",
+      "type": "choice",
+      "default": "none",
+      "options": [
+        [
+          "none",
+          "Fastest"
+        ],
+        [
+          "tolls",
+          "Avoid tolls"
+        ],
+        [
+          "motorways",
+          "Avoid motorways"
+        ]
+      ]
+    },
+    {
+      "key": "units",
+      "label": "Distance units",
+      "type": "choice",
+      "default": "metric",
+      "options": [
+        [
+          "metric",
+          "Kilometres"
+        ],
+        [
+          "imperial",
+          "Miles"
+        ]
+      ]
+    },
+    {
+      "key": "demo",
+      "label": "Position",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "Car (demo drive without one)"
+        ],
+        [
+          "on",
+          "Demo drive (Tbilisi)"
+        ],
+        [
+          "off",
+          "Car only"
+        ]
+      ]
+    },
+    {
+      "key": "theme",
+      "label": "Colour theme",
+      "type": "choice",
+      "default": "m_tricolour",
+      "options": [
+        [
+          "m_tricolour",
+          "M Tricolour"
+        ],
+        [
+          "m_red",
+          "M Red"
+        ],
+        [
+          "ice",
+          "Ice White"
+        ],
+        [
+          "amber",
+          "Night Amber"
+        ]
+      ]
+    },
+    {
+      "key": "fps",
+      "label": "Frame rate",
+      "type": "choice",
+      "default": "60",
+      "options": [
+        [
+          "60",
+          "60 fps"
+        ],
+        [
+          "30",
+          "30 fps (less CPU)"
+        ]
+      ]
+    },
+    {
+      "key": "screen",
+      "label": "Screen size",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "Automatic"
+        ],
+        [
+          "10.25",
+          "10.25-inch"
+        ],
+        [
+          "12.3",
+          "12.3-inch"
+        ],
+        [
+          "8.8",
+          "8.8-inch"
+        ]
+      ]
+    },
+    {
+      "key": "layout",
+      "label": "Screen layout",
+      "type": "choice",
+      "default": "full",
+      "options": [
+        [
+          "full",
+          "Full screen"
+        ],
+        [
+          "standard",
+          "Standard"
+        ]
+      ]
+    },
+    {
+      "key": "renderer",
+      "label": "Renderer",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "GPU 60 fps (default)"
+        ],
+        [
+          "software",
+          "Software"
+        ]
+      ]
+    }
+  ],
+  "config": {
+    "comment": "positioning: the car's own GNSS / navigation position, when known for this firmware (run deploy/car/nav-recon.sh on the car to find it). Each entry: { iface, instance, field, lat, lon, heading, speed (dotted paths into the field's value), scale: { lat, lon, heading, speed } (multipliers to degrees / km/h) }. Add the interface to \"signals\" too, with \"_optional\". Empty: speed and turn rate along the roads (dead reckoning) from the last position or one set on the map.",
+    "positioning": [],
+    "navButtonComment": "navButton: what the console's NAV button sends, so pressing it opens this app on top of the stock screen. The HMI always gets the button too (nothing is blocked): with this app not running, NAV works as stock. Two sources: the controller gate's read-only button feed (mgu-inputgate.so built from kit/renderd/inputgate, and /var/opt/mgu-inputgate/buttons, which the installer creates), or a SOME/IP field: iface + field from deploy/car/nav-recon.sh (add it to signals with _optional). match: byte pattern in hex, xx for a byte that changes (a counter), e.g. \"xx 01 a4 xx\"; the Route page can learn it (press NAV three times). Empty: learn on the car.",
+    "navButton": {
+      "match": "",
+      "iface": null,
+      "instance": "1",
+      "field": null
+    }
+  }
+}
