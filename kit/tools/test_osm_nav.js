@@ -73,6 +73,41 @@ assert(tbilisi.length && /Tbilisi/.test(tbilisi[0].title('en')), 'finds Tbilisi'
 assert(s.find('რუსთაველ', here, 5).length, 'Georgian prefix search');
 assert(s.find('41.6934, 44.8015', here, 3)[0].title('en') === '41.69340, 44.80150', 'coordinates as a destination');
 
+// ---- fuel: the cluster's tank and range (read only), range on arrival, a stop on a long route ----
+const FU = require(path.join(APP, 'fuel'));
+let fuelH = null;
+const fctx = { log: { info() {}, warn() {} }, signals: { watch: (iface, inst, h) => { assert.strictEqual(iface, 'de.bmw.infotainment.KombiIF'); fuelH = h; return Promise.resolve({ shutdown() {} }); } } };
+const fuel = new FU.Fuel(fctx);
+let refuelled = 0;
+fuel.onEvent((e) => { if (e === 'refuelled') refuelled++; });
+fuel.start();
+assert.strictEqual(fuel.state(false), null, 'nothing from the car yet, no demo: no fuel data');
+fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 255, range: 4095, mileageKilometre: 0 });
+assert.strictEqual(fuel.state(false), null, 'not-known values are not data');
+fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 22, range: 280, mileageKilometre: 81234 });
+fuelH.statusBordcomputerAverage({ consumptionAverage1BC1: 79, statusUnitOfMeasurementConsumptionBC: 1 });
+let fs0 = fuel.state(false);
+assert(fs0.litres === 22 && fs0.rangeKm === 280 && fs0.source === 'car' && Math.abs(fs0.cons.value - 7.9) < 1e-9 && fs0.cons.unit === 'l/100 km', 'tank, range, consumption: ' + JSON.stringify(fs0));
+fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 58, range: 760, mileageKilometre: 81240 });
+assert.strictEqual(refuelled, 1, 'the tank going up is a refuel');
+fuel.stop();
+assert(FU.arrivalKm(280, far.length) < 0, 'Tbilisi - Batumi on 280 km: short (' + Math.round(FU.arrivalKm(280, far.length)) + ' km)');
+const stations = s.near([10], here, 100000);
+assert(stations.length > 50, 'fuel stations in the map: ' + stations.length);
+let t0 = Date.now();
+const along = FU.stationsAlong(far, 0, stations);
+const alongMs = Date.now() - t0;
+assert(along.length > 10, 'stations along Tbilisi - Batumi: ' + along.length + ' in ' + alongMs + ' ms');
+assert(along.every((x, i) => x.off <= 1500 && (!i || x.s >= along[i - 1].s)), 'within 1.5 km of the road, in route order');
+const stop = FU.pickStop(along, 280, 0);
+assert(stop && stop.s <= (280 - FU.STOP_RESERVE_KM) * 1000 && stop.s > 100000, 'the stop: the last one reached with a reserve, ' + Math.round(stop.s / 1000) + ' km in');
+const via = router.snap(stop.st.x, stop.st.y, null, 400);
+const viaRoute = router.route(a, at(41.6168, 41.6367), { vias: [via] });
+assert(viaRoute && viaRoute.length >= far.length - 50 && viaRoute.length < far.length + 5000, 'the route through the stop is about as long: ' + Math.round(viaRoute.length / 1000) + ' km');
+assert.strictEqual(FU.pickStop(along, 25, 0), along[0], 'too little for any with the reserve: the first one ahead');
+const ahead = FU.nearestAhead(s.near([10], here, 8), { x: here.x, y: here.y, heading: 0, speed: 0 }, 0.75);
+assert(ahead && ahead.kind === 10, 'parked, low fuel: the nearest station');
+
 // ---- the car's GPS field: its encoding is the one that lands on the installed map ----
 const ctx = { log: { info() {}, warn() {} }, dataDir: os.tmpdir(), spec: { config: {} }, settings: { get: () => 'off' } };
 const pos = new Position(ctx, { pack, router, packs: () => [pack], route: () => null });
@@ -82,4 +117,5 @@ assert(close(pos._autoScale(416934000, 448015000, 'e7'), 41.6934, 44.8015), '1e-
 assert(close(pos._autoScale(Math.round(41.6934 * 2147483648 / 180), Math.round(44.8015 * 2147483648 / 180), 'semi'), 41.6934, 44.8015), 'semicircles (not taken for 1e-7 degrees)');
 assert.strictEqual(pos._autoScale(48.85, 2.35, 'paris'), null, 'a fix on no installed map: not used');
 pack.close && pack.close();
-console.log('osm_nav: all checks passed (Tbilisi - Batumi ' + Math.round(far.length / 1000) + ' km in ' + far.searchMs + ' ms)');
+console.log('osm_nav: all checks passed (Tbilisi - Batumi ' + Math.round(far.length / 1000) + ' km in ' + far.searchMs + ' ms; '
+    + along.length + ' of ' + stations.length + ' fuel stations along it in ' + alongMs + ' ms, stop at ' + Math.round(stop.s / 1000) + ' km)');

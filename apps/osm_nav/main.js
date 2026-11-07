@@ -12,6 +12,10 @@
  *   Route   turn-by-turn maneuver step list, route preferences (Fastest / Avoid tolls / Avoid motorways),
  *           saved places, GPS/Dead-Reckoning status, and one-tap physical NAV button binding.
  *
+ * Fuel (fuel.js, the car's tank level and range, read only): range on arrival in the trip bar, a fuel stop
+ * on the route when the range is short (the furthest station reached with a reserve), and the nearest
+ * station ahead when the tank is low with no route.
+ *
  * Routes (router.js) are planned on the car from the map pack (kit/tools/pack_osm.py), followed with
  * off-route detection and a new plan when the car leaves them. Position (gps.js): the car's signals
  * with map matching and dead reckoning, or the Tbilisi demo drive (VM, emulator, preview).
@@ -27,6 +31,7 @@ const { MapView, poiIcon } = require('./map_view');
 const { Position, TOUR } = require('./gps');
 const { Search, CATEGORIES, kindName, KIND } = require('./search');
 const navkey = require('./navkey');
+const FU = require('./fuel');
 const H = require('./hud');
 
 const W = 1600, PH = 520;
@@ -64,6 +69,9 @@ mgu.run({
         const view = new MapView(packs);
         const nav = { get pack() { return pack; }, get router() { return pack && routerFor(pack); }, route: () => S.route, packs: () => packs };
         const pos = new Position(ctx, nav);
+        const fuel = new FU.Fuel(ctx);
+        // the position and the fuel level are followed together: on screen, with guidance or the widget
+        const track = (on) => { if (on) { pos.start(); fuel.start(); } else { pos.stop(); fuel.stop(); } };
         const search = pack ? new Search(pack, ctx.dataDir) : null;
 
         /* ---------- state ---------- */
@@ -82,6 +90,7 @@ mgu.run({
             follow: true, lastTouch: 0, userZoomAt: 0, overview: false, crosshair: false, sel: null,
             query: '', kbd: settings.get('mapLang') === 'en' ? 'en' : 'ka', results: [], scroll: 0, cat: null,
             routeScroll: 0, learn: null, learnSource: '', navKey,
+            stop: null, fuelFor: null, fuelAlong: null, lowWarned: false,
             lastFrame: Date.now(), arrivedAt: 0, confirmClear: 0,
         };
         const start0 = pack ? merc(41.7019, 44.7938) : [0, 0];
@@ -107,14 +116,21 @@ mgu.run({
             const a = R.snap(fix.x, fix.y, fix.speed > 4 || fix.source !== 'dr' ? fix.heading : null, 500), b = R.snap(place.x, place.y, null, 3000);
             if (!a || !b) { toast(H.tr(ulang()).noRoute); return false; }
             const t = Date.now();
-            const route = R.route(a, b, { avoid: settings.get('avoid'), vias: opts.vias });
+            let vias = opts.vias;
+            if (!vias && S.stop) { const v = R.snap(S.stop.x, S.stop.y, null, 400); if (v) vias = [v]; else S.stop = null; }
+            const route = R.route(a, b, { avoid: settings.get('avoid'), vias });
             if (!route) { toast(H.tr(ulang()).noRoute); return false; }
             log.info('route: ' + (route.length / 1000).toFixed(1) + ' km, ' + Math.round(route.duration / 60) + ' min, ' + route.maneuvers.length + ' maneuvers, planned in ' + (Date.now() - t) + ' ms (search ' + route.searchMs + ' ms)');
             S.route = route; S.guide = new Guidance(R, route); S.g = null; S.dest = place; S.lastPlan = Date.now(); S.arrivedAt = 0; S.routeScroll = 0;
-            if (!opts.quiet) { S.follow = true; S.overview = false; S.sel = null; S.crosshair = false; }
+            if (!opts.quiet) {
+                S.follow = true; S.overview = false; S.sel = null; S.crosshair = false;
+                const fp = fuelPlan();
+                if (fp && fp.need) toast(ulang() === 'ka' ? 'საწვავი არ ეყოფა: დაამატეთ გაჩერება ბენზინგასამართ სადგურზე' : 'Not enough fuel for this trip: add a fuel stop', 6000);
+            }
             return true;
         }
         function navigateTo(place) {
+            S.stop = null;
             if (!plan(place)) return false;
             if (search && !place.tour) search.addRecent(Search.place(place.title, place.sub, place.x, place.y));
             page = 0;
@@ -122,7 +138,7 @@ mgu.run({
         }
         function cancelRoute() {
             if (S.dest && S.dest.tour) S.cancelledTour = true;
-            S.route = null; S.guide = null; S.g = null; S.dest = null; S.routeScroll = 0;
+            S.route = null; S.guide = null; S.g = null; S.dest = null; S.routeScroll = 0; S.stop = null;
         }
         function startTour() {
             if (!pack || S.route || S.cancelledTour) return;
@@ -133,6 +149,50 @@ mgu.run({
             S.dest = { title: lang() === 'en' ? TOUR.destName.latin : TOUR.destName.local, x: end.x, y: end.y, tour: true };
         }
         pos.onDemoEnd = () => { if (S.dest && S.dest.tour) { S.route = null; S.dest = null; startTour(); } };
+
+        /* ---------- fuel: range on arrival, a fuel stop on the route, the nearest station when low ---------- */
+        let allFuel = null;
+        const fuelStations = () => {
+            if (!allFuel) allFuel = search ? search.near([KIND.FUEL], { x: view.camera.x, y: view.camera.y }, 100000) : [];
+            return allFuel;
+        };
+        /** { f, arr (km at the destination), need (no stop yet and arr below the reserve), along, s0 } or null */
+        function fuelPlan() {
+            const f = fuel.state(demo());
+            if (!f || typeof f.rangeKm !== 'number' || !S.route) return null;
+            const s0 = S.g ? S.g.s : 0, left = S.g ? S.g.left : S.route.length;
+            const arr = FU.arrivalKm(f.rangeKm, left);
+            const need = !S.stop && arr < FU.RESERVE_KM;
+            if (need && S.fuelFor !== S.route) { S.fuelFor = S.route; S.fuelAlong = FU.stationsAlong(S.route, s0, fuelStations()); }
+            return { f, arr, need, along: need ? S.fuelAlong : null, s0 };
+        }
+        const stopTitle = (st) => (typeof st.title === 'function' ? st.title(lang()) : st.title) || (ulang() === 'ka' ? 'ბენზინგასამართი' : 'Fuel station');
+        /** Stop for fuel on the way: the station fuel.js picks (or st), the route planned again through it. */
+        function addFuelStop(st) {
+            const fp = fuelPlan();
+            if (!st && fp) { const a = FU.pickStop(fp.along, fp.f.rangeKm, fp.s0); st = a && a.st; }
+            const L = ulang() === 'ka';
+            if (!st) { toast(L ? 'მარშრუტის გასწვრივ ბენზინგასამართი ვერ მოიძებნა' : 'No fuel station along the route'); return; }
+            S.stop = { title: stopTitle(st), x: st.x, y: st.y };
+            if (!S.dest || !plan(S.dest, { quiet: true })) { S.stop = null; return; }
+            toast((L ? 'გაჩერება: ' : 'Fuel stop: ') + S.stop.title, 4000);
+        }
+        function removeFuelStop() { S.stop = null; if (S.dest) plan(S.dest, { quiet: true }); }
+        /** Low fuel, no route: to the nearest station roughly ahead. */
+        function goFuel() {
+            const fix = pos.fix(), at = fix || { x: view.camera.x, y: view.camera.y };
+            const st = FU.nearestAhead(search ? search.near([KIND.FUEL], at, 8) : [], fix, groundScale(at.y));
+            if (!st) { toast(ulang() === 'ka' ? 'ბენზინგასამართი ვერ მოიძებნა' : 'No fuel station found'); return; }
+            navigateTo({ title: stopTitle(st), sub: typeof st.sub === 'function' ? st.sub(lang()) : '', x: st.x, y: st.y });
+        }
+        fuel.onEvent((e) => {
+            if (e !== 'refuelled') return;
+            S.lowWarned = false;
+            if (S.stop) { toast(ulang() === 'ka' ? 'საწვავი შევსებულია: მარშრუტი განახლდა' : 'Refuelled: route updated', 4000); removeFuelStop(); }
+            kick();
+        });
+        const kmText = (km) => String(Math.round(imperial() ? km / 1.609 : km));
+        const kmUnit = () => (imperial() ? 'mi' : (ulang() === 'ka' ? 'კმ' : 'km'));
 
         /* ---------- camera ---------- */
         function updateCamera(dt, fix, mh) {
@@ -291,7 +351,8 @@ mgu.run({
             const routeS = S.g ? S.g.s : 0;
             view.draw(cv, vp, {
                 route: S.route, routeS, car: fix ? { x: fix.x, y: fix.y, heading: fix.heading } : null,
-                dest: S.dest, avoid, scale: Math.max(1, k / 1.2), pins: S.sel ? [{ x: S.sel.x, y: S.sel.y, color: '#1f6fd6' }] : null,
+                dest: S.dest, avoid, scale: Math.max(1, k / 1.2),
+                pins: [S.sel ? { x: S.sel.x, y: S.sel.y, color: '#1f6fd6' } : null, S.stop ? { x: S.stop.x, y: S.stop.y, color: '#d97706' } : null].filter(Boolean),
             });
             if (S.crosshair) {
                 const c = '#ffffff';
@@ -394,10 +455,19 @@ mgu.run({
                 stat(d[0], d[1], T.left_);
                 const du = H.fmtDur(S.g.secs);
                 stat(du[0], du[1], '');
+                const fp = fuelPlan();
+                if (S.stop) {
+                    const ds = H.fmtDist(fix ? Math.hypot(S.stop.x - fix.x, S.stop.y - fix.y) * groundScale(S.stop.y) : 0, imperial());
+                    stat(ds[0], ds[1], ulang() === 'ka' ? 'საწვავის გაჩერება' : 'fuel stop', '#ffb020');
+                } else if (fp) {
+                    stat((fp.arr < 0 ? '-' : '') + kmText(Math.abs(fp.arr)), kmUnit(), ulang() === 'ka' ? 'მისვლისას' : 'range on arrival', fp.arr < 0 ? '#ff4d4d' : fp.arr < FU.RESERVE_KM ? '#ffb020' : '#ffffff');
+                }
             } else {
                 const ll = fix ? unmerc(fix.x, fix.y) : null;
                 cv.text(ll ? ll[0].toFixed(4) + ', ' + ll[1].toFixed(4) : (ulang() === 'ka' ? 'მდებარეობა უცნობია' : 'No position'), cx, base, sz(16), '#c9d1db', { literal: true });
                 cx += sz(230);
+                const f = fuel.state(demo());
+                if (f && typeof f.rangeKm === 'number') stat(kmText(f.rangeKm), kmUnit(), ulang() === 'ka' ? 'მარაგი' : 'range', f.rangeKm < FU.LOW_KM ? '#ffb020' : '#ffffff');
             }
             // speed (red over the limit)
             if (fix) {
@@ -417,11 +487,15 @@ mgu.run({
             const L = ulang() === 'ka';
             if (S.route) {
                 btn(L ? 'გაუქმება' : 'Cancel', () => { cancelRoute(); kick(); }, 'cancel', { color: '#b3261e', primary: true });
+                const fp = fuelPlan();
+                if (fp && fp.need) btn(L ? 'საწვავის გაჩერება' : 'Add fuel stop', () => { addFuelStop(); kick(); }, 'fuelstop', { color: '#d97706', primary: true });
                 btn(S.overview ? (L ? 'მიყოლა' : 'Follow') : (L ? 'მიმოხილვა' : 'Overview'), () => { if (S.overview) { S.follow = true; S.overview = false; } else overview(); kick(); }, 'overview');
             } else {
                 const P = search && search.places;
                 if (P && P.work) btn(L ? 'სამსახური' : 'Work', () => navigateTo(P.work), 'work');
                 if (P && P.home) btn(L ? 'სახლი' : 'Home', () => navigateTo(P.home), 'home');
+                const f = fuel.state(demo());
+                if (f && typeof f.rangeKm === 'number' && f.rangeKm < FU.LOW_KM) btn(L ? 'საწვავი' : 'Fuel', () => { goFuel(); kick(); }, 'gofuel', { color: '#d97706', primary: true });
                 if (demo() && S.cancelledTour) btn(L ? 'დემო ტური' : 'Demo tour', () => { S.cancelledTour = false; startTour(); kick(); }, 'tour');
             }
             btn(L ? 'ძიება' : 'Search', () => { page = 1; kick(); }, 'search', { primary: true });
@@ -594,6 +668,15 @@ mgu.run({
             } catch (e) { /* read-only (preview) */ }
         }
 
+        function fuelLine() {
+            const f = fuel.state(demo()), L = ulang() === 'ka';
+            if (!f) return L ? 'მანქანიდან მონაცემი არ არის (KombiIF)' : 'No data from the car (KombiIF)';
+            const parts = [];
+            if (typeof f.litres === 'number') parts.push(f.litres + (L ? ' ლ' : ' l'));
+            if (typeof f.rangeKm === 'number') parts.push(kmText(f.rangeKm) + ' ' + kmUnit() + (L ? ' მარაგი' : ' range'));
+            if (f.cons) parts.push(f.cons.value.toFixed(1) + ' ' + f.cons.unit);
+            return parts.join('  ·  ') + (f.source === 'demo' ? (L ? '  (დემო)' : '  (demo)') : '');
+        }
         function drawRoute(cv, t, fix) {
             const k = kOf(cv), sz = (n) => Math.round(n * k), L = ulang() === 'ka';
             const bottom = PH + (cv.extra || 0), top = TOP + sz(6);
@@ -612,10 +695,20 @@ mgu.run({
             if (S.route && S.dest) {
                 const T = H.tr(ulang());
                 const g = S.g || { s: 0, next: 0, left: S.route.length, secs: S.route.duration };
-                cv.text(fit(cv, S.dest.title || (L ? 'დანიშნულება' : 'Destination'), lw - sz(220), sz(20), { font: 'bold' }), lx + sz(16), top + sz(30), sz(20), '#ffffff', { literal: true, font: 'bold' });
+                const fp = fuelPlan(), fuelBtn = !!(S.stop || (fp && fp.need));
+                const tw0 = lw - sz(fuelBtn ? 360 : 220);
+                cv.text(fit(cv, S.dest.title || (L ? 'დანიშნულება' : 'Destination'), tw0, sz(20), { font: 'bold' }), lx + sz(16), top + sz(30), sz(20), '#ffffff', { literal: true, font: 'bold' });
                 const d = H.fmtDist(g.left, imperial()), du = H.fmtDur(g.secs), eta = H.clock(new Date(Date.now() + g.secs * 1000));
-                const sub = d[0] + ' ' + d[1] + '  ·  ' + du[0] + ' ' + du[1] + '  ·  ' + T.eta + ' ' + eta;
-                cv.text(fit(cv, sub, lw - sz(220), sz(14)), lx + sz(16), top + sz(54), sz(14), '#aeb6c1', { literal: true });
+                // fuel before the arrival time: a long line loses the time (the trip bar has it), not the fuel
+                let sub = d[0] + ' ' + d[1] + '  ·  ' + du[0] + ' ' + du[1];
+                if (S.stop) sub += '  ·  ' + (L ? 'გაჩერება: ' : 'via ') + S.stop.title;
+                else if (fp) sub += '  ·  ' + (L ? 'მისვლისას ' : 'arrive with ') + (fp.arr < 0 ? '-' : '') + kmText(Math.abs(fp.arr)) + ' ' + kmUnit();
+                sub += '  ·  ' + T.eta + ' ' + eta;
+                cv.text(fit(cv, sub, tw0, sz(14)), lx + sz(16), top + sz(54), sz(14), fp && fp.need ? '#ffb020' : '#aeb6c1', { literal: true });
+                if (fuelBtn) {
+                    button(cv, t, lx + lw - sz(344), top + sz(14), sz(130), sz(36), S.stop ? (L ? 'გაჩერების მოხსნა' : 'Remove stop') : (L ? '+ საწვავი' : '+ Fuel stop'),
+                        () => { if (S.stop) removeFuelStop(); else addFuelStop(); kick(); }, 'rt_fuel', S.stop ? null : { primary: true, color: '#d97706' });
+                }
 
                 const bh = sz(36);
                 button(cv, t, lx + lw - sz(102), top + sz(14), sz(90), bh, L ? 'გაუქმება' : 'Cancel', () => { cancelRoute(); kick(); }, 'rt_cancel', { primary: true, color: '#b3261e' });
@@ -684,6 +777,7 @@ mgu.run({
                     [L ? 'პოზიციის წყარო:' : 'Position source:', srcLabel],
                     [L ? 'კოორდინატები:' : 'Coordinates:', ll ? ll[0].toFixed(5) + ', ' + ll[1].toFixed(5) + '  (' + Math.round(fix.heading || 0) + ' deg)' : '—'],
                     [L ? 'მიმდინარე გზა:' : 'Current road:', roadName || '—'],
+                    [L ? 'საწვავი:' : 'Fuel:', fuelLine()],
                     [L ? 'დაყენებული რუკა:' : 'Installed map:', packs.map((p) => p.meta.region + ' (' + p.meta.counts.nodes + ' nodes, ' + p.meta.counts.edges + ' roads)').join(', ')],
                 ];
                 lines.forEach((ln) => {
@@ -772,6 +866,18 @@ mgu.run({
             const cv = ctx.canvas(W, PH).clear('#0b0e13');
             const fix = pos.fix();
             if (demo() && !S.route) startTour();
+            if (fix && fix.source === 'demo') fuel.demoDrive(fix.speed * dt / 3600);
+            if (S.stop && fix && Math.hypot(S.stop.x - fix.x, S.stop.y - fix.y) * groundScale(fix.y) < 60) {
+                log.info('fuel stop reached: ' + S.stop.title);
+                S.stop = null;
+            }
+            const f0 = fuel.state(demo());
+            if (f0 && typeof f0.rangeKm === 'number' && f0.source === 'car') {
+                if (f0.rangeKm < FU.LOW_KM && !S.lowWarned) {
+                    S.lowWarned = true;
+                    toast((ulang() === 'ka' ? 'საწვავი მთავრდება: ' : 'Low fuel: ') + kmText(f0.rangeKm) + ' ' + kmUnit(), 6000);
+                } else if (f0.rangeKm > FU.LOW_KM + 20) S.lowWarned = false;
+            }
             if (S.route && S.guide && fix) {
                 S.g = S.guide.update(fix, now);
                 if (S.g.offRoute && now - S.lastPlan > 4000 && S.dest) {
@@ -879,7 +985,7 @@ mgu.run({
         const cleanup = () => {
             if (cleanedUp) return;
             cleanedUp = true;
-            try { pos.stop(); } catch (e) {}
+            try { track(false); } catch (e) {}
             try { if (navSrv) navSrv.close(); } catch (e) {}
             try { packs.forEach((p) => p && p.close && p.close()); } catch (e) {}
         };
@@ -895,8 +1001,8 @@ mgu.run({
             const wLastKey = {};
             ctx.widget.onChange(() => {
                 Object.keys(wLastKey).forEach((k) => { delete wLastKey[k]; });
-                if (ctx.widget.active()) pos.start();
-                else if (!ui.isVisible('MAIN') && !S.route) pos.stop();
+                if (ctx.widget.active()) track(true);
+                else if (!ui.isVisible('MAIN') && !S.route) track(false);
             });
             ctx.widget.loop(1.0, (inst) => {
                 if (!packs.length) return null;
@@ -955,11 +1061,11 @@ mgu.run({
         };
         ui.onVisible((name, v) => {
             if (name !== 'MAIN') return;
-            if (v) { pos.start(); pos._tick(); kick(); }
-            else if (!S.route && !(ctx.widget && ctx.widget.active())) pos.stop();          // guidance / widget keeps track of the car off screen
+            if (v) { track(true); pos._tick(); kick(); }
+            else if (!S.route && !(ctx.widget && ctx.widget.active())) track(false);          // guidance / widget keeps track of the car off screen
         });
         if (ui.isVisible('MAIN') || (ctx.widget && ctx.widget.active()) || ctx.previewDemo) {
-            pos.start();
+            track(true);
             pos._tick();
         }
         // a first frame for the PC preview and the emulator (on the car the screen opens later and draws then)

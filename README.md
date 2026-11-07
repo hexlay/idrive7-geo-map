@@ -34,6 +34,7 @@ This repository is built on the open-source BMW iDrive 7 platform:
 
 * **The map**: all of Georgia from OpenStreetMap, on the car (no internet), drawn by the GPU at 60 fps, heading up or north up, day and night colours, street names in Georgian, English or both, road numbers (ს1 / S1, E60).
 * **Guidance**: routes are planned on the car (fastest, avoid tolls, avoid motorways), with the next turn, its distance and street, roundabout exits, the arrival time, a new route when you leave it, and the speed limit of the road when OpenStreetMap has it (BMW style sign, red when you are over it).
+* **Fuel**: the tank level and range from the cluster (read only, `KombiIF`). The trip bar shows the range, or with a route the range on arrival (amber under 50 km). When it is short, *Add fuel stop* routes you through the furthest station on the way that you still reach with 30 km to spare; filling up removes the stop. Under 60 km with no route, a *Fuel* button takes you to the nearest station ahead. Cars without these signals install and run without it.
 * **Search** in Georgian and Latin letters, by category (fuel, charging, parking, hospitals ...), Home, Work, favourites, recent places and coordinates. The keyboard locks while the car drives.
 * **The NAV button**: Navigation can open itself when you press the console's NAV button. Nothing in the HMI is blocked or changed: the HMI still gets NAV and opens its own screen, and Navigation is then opened over it. If Navigation is not running, NAV works exactly as stock. Learn the button on the **Route** page (press NAV three times); *Forget* undoes it. It needs the button events from the controller gate (`mgu-inputgate.so` built from `kit/renderd/inputgate`, read only) or a SOME/IP button field found with `deploy/car/nav-recon.sh`.
 * **Start with the car**: place Navigation's widget on the home screen. MainApp then starts the app with the head unit (the supported way: no start setting is changed), so NAV works from the first press, and the widget shows the map and the next turn.
@@ -63,9 +64,11 @@ The head unit's installer refuses an app outright if its SOME/IP manifest names 
 
 * Build: `python3 kit/tools/build.py osm_nav` writes `dist/osm_nav@<version>.tgz`.
 * Emulator: `node kit/tools/emu.js osm_nav` runs the app in the browser emulator; `node kit/tools/preview.js dist/osm_nav <outDir>` renders it to PNGs.
-* Tests: `node kit/tools/test_osm_nav.js [map.pack]` (NAV button learning, GPS decoding, routing, guidance and search).
+* Tests: `node kit/tools/test_osm_nav.js [map.pack]` (NAV button learning, GPS decoding, routing, guidance, search and fuel stops) and `node kit/tools/test_nav_recon_diff.js`.
 * Map pack: `python3 kit/tools/pack_osm.py --fetch georgia -o apps/osm_nav/georgia.pack`.
-* Finding the car's GPS and button signals: `deploy/car/nav-recon.sh` on the head unit.
+* Finding the car's GPS and button signals: `deploy/car/nav-recon.sh` on the head unit (read only). `cpu.txt` in its report shows what each process costs.
+* Where CarPlay puts its cluster map and HUD arrows: run `LABEL=base SNIFF=60 sh nav-recon.sh` (CarPlay off) and `LABEL=carplay SNIFF=60 sh nav-recon.sh` (CarPlay guiding, its map in the cluster, the HUD on), then `node kit/tools/nav-recon-diff.js <base report> <carplay report>`. It lists the surfaces, processes and SOME/IP services that appear with CarPlay's guidance. Only display is in scope: nothing is sent to KAFAS, cruise control or Speed Limit Assist.
+* Preview with a nearly empty demo tank: `OSM_NAV_DEMO_FUEL=6 node kit/tools/preview.js dist/osm_nav <outDir>`.
 
 ---
 

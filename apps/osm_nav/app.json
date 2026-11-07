@@ -35,6 +35,11 @@
     "de.bmw.infrastructure.VehicleInformation": {
       "statusGearboxDrive": "s",
       "DataPowerTrain2": "s"
+    },
+    "de.bmw.infotainment.KombiIF": {
+      "statusRangeTankStatus": "rs",
+      "statusBordcomputerAverage": "rs",
+      "_optional": "fuel level and range: range on arrival, fuel stops and the low-fuel button"
     }
   },
   "screens": [

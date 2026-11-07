@@ -8,6 +8,19 @@
 #   OUT=/var/tmp/recon sh nav-recon.sh
 #   BUTTONS=30 sh nav-recon.sh       also record 30 s of console button codes (needs the
 #                                    controller gate's opt-in, see the end of the report)
+#   LABEL=carplay SNIFF=60 sh nav-recon.sh
+#                                    name the run (nav-recon-carplay-<time>) and record 60 s of
+#                                    the unit's network traffic, first 256 bytes of each packet
+#                                    (SOME/IP headers: which service talks to the cluster / HUD)
+#   SAMPLE=20 sh nav-recon.sh        measure CPU over 20 s instead of 10
+#
+# Cluster map / HUD arrows, as CarPlay does them: run it twice, the same way, and compare on the PC:
+#   1. LABEL=base SNIFF=60 sh nav-recon.sh       CarPlay off, cluster on its normal view
+#   2. LABEL=carplay SNIFF=60 sh nav-recon.sh    CarPlay on, Waze / Google Maps guiding a route,
+#                                                the map in the cluster, the HUD on
+#   node kit/tools/nav-recon-diff.js nav-recon-base-<time> nav-recon-carplay-<time>
+# What changes between them (a surface shown, a process busy, a SOME/IP service sending) is where
+# CarPlay's cluster map and turn arrows go.
 #
 # Collects, without changing anything on the unit:
 #   1. SOME/IP: every interface in /etc/oap/someip/someip-interfaces.json about positioning,
@@ -22,18 +35,27 @@
 #      renderer, the KOMBI video stream) - and which process is which.
 #   3. The HMI binary: its eGfxId* / surface strings for Nav, Map, EmbeddedSurface, WelcomeApp.
 #   4. The stock map: the /mnt/map mount, ROOT.NDS / PRODUCT metadata (names, sizes, versions).
-#   5. Processes and services that look like navigation (names only, nothing is stopped).
+#   5. Processes and services that look like navigation, CarPlay / projection, the cluster or the
+#      HUD (names only, nothing is stopped), and every process's CPU over SAMPLE seconds
+#      (cpu.txt: what the stock navigation, the HMI and CarPlay cost).
+#   6. Optional (SNIFF=<s>): a capture of the unit's network traffic, 256 bytes a packet, SSH left
+#      out (someip.pcap): the SOME/IP services between the head unit, the cluster and the HUD.
+#      It stays in the report folder: keep it on your own PC (it can carry the car's position).
 #
-# Writes only into its own output folder. Never stops, kills or deletes anything: the stock
-# navigation daemon has to stay up (KAFAS, the driving assistants and the gearbox read its
-# electronic horizon and country state).
+# Writes only into its own output folder. Never stops, kills or deletes anything of the unit's
+# (it ends only the tcpdump it started itself): the stock navigation daemon has to stay up
+# (KAFAS, the driving assistants and the gearbox read its electronic horizon and country state).
 # ============================================================================
 set -u
 NOW=$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)
-OUT=${OUT:-$(pwd)/nav-recon-$NOW}
+LABEL=${LABEL:-}
+case "$LABEL" in *[!A-Za-z0-9_-]*) echo "nav-recon: LABEL: letters, digits, - and _ only" >&2; exit 1 ;; esac
+OUT=${OUT:-$(pwd)/nav-recon-${LABEL:+$LABEL-}$NOW}
 CATALOG=${CATALOG:-/etc/oap/someip/someip-interfaces.json}
-PATTERN=${PATTERN:-'[Pp]osition|[Gg][Nn][Ss][Ss]|[Gg][Pp][Ss]|[Nn]avi|[Gg]uidance|[Mm]aneuver|[Mm]anoeuvre|[Rr]oute|[Hh][Uu][Dd]|[Hh]ead[Uu]p|[Kk]ombi|[Ss]peed[Ll]imit|[Ss][Ll][Ii]|[Ee]horizon|[Ee]lectronicHorizon|[Hh]eading|[Gg]eo|[Ll]atitude|[Ll]ongitude|[Cc]ompass|[Tt]imeZone|FrontCCU|[Cc]ontrol[Ee]lement|[Hh]ard[Kk]ey|[Bb]utton'}
+PATTERN=${PATTERN:-'[Pp]osition|[Gg][Nn][Ss][Ss]|[Gg][Pp][Ss]|[Nn]avi|[Gg]uidance|[Mm]aneuver|[Mm]anoeuvre|[Rr]oute|[Hh][Uu][Dd]|[Hh]ead[Uu]p|[Kk]ombi|[Ss]peed[Ll]imit|[Ss][Ll][Ii]|[Ee]horizon|[Ee]lectronicHorizon|[Hh]eading|[Gg]eo|[Ll]atitude|[Ll]ongitude|[Cc]ompass|[Tt]imeZone|FrontCCU|[Cc]ontrol[Ee]lement|[Hh]ard[Kk]ey|[Bb]utton|[Cc]ar[Pp]lay|[Pp]rojection|[Ss]martphone[Ii]ntegration|[Tt]urn[Bb]y[Tt]urn|[Rr]oute[Gg]uidance|[Ii]nstrument[Cc]luster|[Ee]xternal[Nn]av|[Aa]ndroid[Aa]uto'}
 BUTTONS=${BUTTONS:-0}
+SNIFF=${SNIFF:-0}
+SAMPLE=${SAMPLE:-10}
 
 mkdir -p "$OUT" || { echo "nav-recon: cannot write $OUT" >&2; exit 1; }
 say() { echo "[nav-recon] $*"; echo "$*" >> "$OUT/summary.txt"; }
@@ -43,7 +65,8 @@ run() {   # run <file> <command...>: its output (and errors) into the report, ne
 }
 NODE=$(command -v node 2>/dev/null || ls /usr/bin/node* 2>/dev/null | head -n 1)
 
-say "nav-recon $NOW on $(hostname 2>/dev/null) ($(uname -r 2>/dev/null))"
+say "nav-recon $NOW${LABEL:+ ($LABEL)} on $(hostname 2>/dev/null) ($(uname -r 2>/dev/null))"
+echo "${LABEL:-unlabelled} $NOW" > "$OUT/label.txt"
 run uname.txt uname -a
 [ -r /etc/os-release ] && cp /etc/os-release "$OUT/os-release.txt"
 for f in /etc/version /etc/sw_version /etc/build /etc/issue; do [ -r "$f" ] && cp "$f" "$OUT/$(basename "$f").txt"; done
@@ -122,15 +145,44 @@ ls -l /run/wayland/ > "$OUT/wayland-sockets.txt" 2>&1
         cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c 1-200)
         [ -z "$cmd" ] && continue
         case "$cmd" in
-            *HmiMain*|*[Nn]avi*|*[Mm]ap*|*[Kk]ombi*|*[Kk][Oo][Mm][Bb][Ii]*|*[Hh][Uu][Dd]*|*[Pp]osition*|*[Gg][Nn][Ss][Ss]*|*winston*|*weston*|*[Dd]isplay*|*mgu-render*)
+            *HmiMain*|*[Nn]avi*|*[Mm]ap*|*[Kk]ombi*|*[Kk][Oo][Mm][Bb][Ii]*|*[Hh][Uu][Dd]*|*[Pp]osition*|*[Gg][Nn][Ss][Ss]*|*winston*|*weston*|*[Dd]isplay*|*mgu-render*|*[Cc]ar[Pp]lay*|*[Ii][Aa][Pp]2*|*[Pp]rojection*|*[Ss]martphone*|*[Aa]ndroid[Aa]uto*|*[Cc]luster*|*[Vv]ideo*)
                 rss=$(awk '/VmRSS/ {print $2 $3}' "$d/status" 2>/dev/null)
                 echo "$pid  $rss  $cmd"
                 ;;
         esac
     done
 } > "$OUT/processes.txt" 2>&1
-say "processes: $(wc -l < "$OUT/processes.txt") look like HMI / navigation / map / KOMBI / display (processes.txt)"
-command -v systemctl >/dev/null 2>&1 && systemctl list-units --all --no-pager 2>/dev/null | grep -Ei 'nav|map|kombi|hud|posit|gnss|gps|hmi|render' > "$OUT/services.txt"
+say "processes: $(wc -l < "$OUT/processes.txt") look like HMI / navigation / map / KOMBI / CarPlay / display (processes.txt)"
+command -v systemctl >/dev/null 2>&1 && systemctl list-units --all --no-pager 2>/dev/null | grep -Ei 'nav|map|kombi|hud|posit|gnss|gps|hmi|render|carplay|projection|smartphone|cluster' > "$OUT/services.txt"
+
+# every process's CPU time over SAMPLE seconds (/proc/<pid>/stat utime + stime): cpu.txt, busiest
+# first - "cpu% pid rss command". A share of one core: 100 = one core busy all the time.
+ticks() {
+    for d in /proc/[0-9]*; do
+        [ -r "$d/stat" ] || continue
+        awk -v p="${d#/proc/}" '{ sub(/^.*\) /, ""); print p, $12 + $13 }' "$d/stat" 2>/dev/null
+    done
+}
+HZ=$(getconf CLK_TCK 2>/dev/null || echo 100)
+unit_ticks() { awk '/^cpu / { s = 0; for (i = 2; i <= NF; i++) s += $i; print s, $5 + $6 }' /proc/stat 2>/dev/null; }
+ticks > "$OUT/.cpu0"
+U0=$(unit_ticks)
+sleep "$SAMPLE"
+ticks > "$OUT/.cpu1"
+U1=$(unit_ticks)
+BUSY=$(echo "$U0 $U1" | awk 'NF == 4 && $3 > $1 { printf "%.0f", 100 - ($4 - $2) * 100 / ($3 - $1) }')
+{
+    echo "# cpu% (of one core) over ${SAMPLE} s, pid, rss, command; HZ $HZ, $(grep -c '^processor' /proc/cpuinfo 2>/dev/null) cores, whole unit ${BUSY:-?}% busy"
+    awk -v hz="$HZ" -v secs="$SAMPLE" 'NR == FNR { a[$1] = $2; next } ($1 in a) { d = $2 - a[$1]; if (d > 0) printf "%.1f %s\n", d * 100 / hz / secs, $1 }' "$OUT/.cpu0" "$OUT/.cpu1" |
+        sort -rn | head -n 80 | while read -r pct pid; do
+            rss=$(awk '/VmRSS/ {print $2 $3}' "/proc/$pid/status" 2>/dev/null)
+            cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c 1-160)
+            [ -z "$cmd" ] && cmd="[$(cat "/proc/$pid/comm" 2>/dev/null)]"
+            echo "$pct $pid ${rss:-?} $cmd"
+        done
+} > "$OUT/cpu.txt" 2>&1
+rm -f "$OUT/.cpu0" "$OUT/.cpu1"
+say "CPU: unit ${BUSY:-?}% busy over ${SAMPLE} s; busiest: $(sed -n 2p "$OUT/cpu.txt" | cut -c 1-100) (cpu.txt)"
 
 # ---- 3. the HMI binary's surface ids -----------------------------------------------------------
 HMI=$(command -v HmiMain3D 2>/dev/null)
@@ -189,6 +241,27 @@ if [ "$BUTTONS" -gt 0 ] 2>/dev/null; then
 fi
 [ -f "$LOG" ] && tail -n 200 "$LOG" > "$OUT/buttons-recent.txt" 2>/dev/null
 
+# ---- 6. network traffic (optional): which SOME/IP services reach the cluster and the HUD -----------
+# The cluster and the HUD are other control units: what the head unit sends them (CarPlay's turn
+# arrows, the map's guidance) crosses the car's Ethernet as SOME/IP. tcpdump only listens; the
+# first 256 bytes of each packet are kept (the SOME/IP header and the start of the data), SSH not.
+if [ "$SNIFF" -gt 0 ] 2>/dev/null; then
+    { ip -o addr 2>/dev/null || ifconfig -a 2>/dev/null; } > "$OUT/net-addrs.txt"
+    { ip -o link 2>/dev/null; ip route 2>/dev/null; } > "$OUT/net-links.txt"
+    TCPDUMP=$(command -v tcpdump 2>/dev/null)
+    [ -z "$TCPDUMP" ] && for p in /usr/sbin/tcpdump /sbin/tcpdump "$(dirname "$0")/tcpdump" ./tcpdump; do [ -x "$p" ] && TCPDUMP=$p && break; done
+    if [ -n "$TCPDUMP" ]; then
+        say "network: recording ${SNIFF} s (someip.pcap) - keep the car as it is meanwhile"
+        "$TCPDUMP" -i any -n -s 256 -U -w "$OUT/someip.pcap" 'not port 22' > "$OUT/tcpdump.log" 2>&1 &
+        TD=$!
+        sleep "$SNIFF"
+        kill "$TD" 2>/dev/null; wait "$TD" 2>/dev/null
+        say "network: $(ls -la "$OUT/someip.pcap" 2>/dev/null | awk '{print $5}') bytes captured (someip.pcap: kit/tools/nav-recon-diff.js reads it)"
+    else
+        say "network: no tcpdump on this unit (a static ARM tcpdump next to this script works too)"
+    fi
+fi
+
 # ---- pack it up ------------------------------------------------------------------------------------
 say "report: $OUT"
 if command -v tar >/dev/null 2>&1; then
@@ -214,4 +287,12 @@ Next steps
       - a SOME/IP field of FrontCCU (someip-navigation.txt): put it in app.json "config.navButton"
         { "iface": "...FrontCCU", "field": "<field>" } and in "signals" with "_optional".
     Put Navigation's widget on the home screen: MainApp then starts the app with the car, so NAV works from the start.
+  * cpu.txt: what each process costs now. Run once with the stock map on screen and once with Navigation
+    (osm_nav) in front: the difference is what the stock map costs while it is covered.
+  * The cluster map and HUD arrows: two runs, LABEL=base and LABEL=carplay (CarPlay guiding, its map in the
+    cluster, the HUD on), each with SNIFF=60, then on the PC:
+      node kit/tools/nav-recon-diff.js <base report> <carplay report>
+    It lists the surfaces, processes and SOME/IP services that appear or get busy with CarPlay's guidance.
+    Only showing things is in scope (a surface on the cluster's screen, turn data for the HUD): nothing
+    for KAFAS, cruise control or Speed Limit Assist.
 EOF
