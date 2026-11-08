@@ -42,6 +42,17 @@ build/mgu-renderd: $(SRC) $(HDR) $(GEN_H) $(GEN_C)
 build/mgu-inputgate.so: inputgate/mgu-inputgate.cpp
 	@mkdir -p build
 	$(CXX) -std=c++14 -O2 -g0 -Wall -shared -fPIC -Iinputgate/vsomeip-include/interface/compat -o $@ $< -ldl
+# the gate as it sits in the HMI (preloaded in front of a fake handleProxyReceive): the NAV button feed is read
+# only and opt-in, the HMI gets every message unchanged (test/test_inputgate.cpp). Root in the build image:
+#   make test-inputgate   (Docker)        make in-test-inputgate   (inside the image)
+IG_INC = -Iinputgate/vsomeip-include/interface/compat
+test-inputgate:
+	$(DOCKER) build -q -t mgu-renderd-build docker >/dev/null
+	$(DOCKER) run --rm -v "$(CURDIR):/w" -w /w mgu-renderd-build make -s in-test-inputgate
+in-test-inputgate: build/mgu-inputgate.so
+	$(CXX) -std=c++14 -O2 -Wall -shared -fPIC $(IG_INC) -o build/test_inputgate_real.so test/test_inputgate_real.cpp
+	$(CXX) -std=c++14 -O2 -Wall $(IG_INC) -o build/test_inputgate test/test_inputgate.cpp build/test_inputgate_real.so -Wl,-rpath,'$$ORIGIN'
+	LD_PRELOAD=$(CURDIR)/build/mgu-inputgate.so build/test_inputgate
 build/ivi-probe: tools/ivi-probe.c $(GEN_H) $(GEN_C)
 	$(CC) -O2 -g0 -Wall -Wno-unused-parameter -I$(GEN_DIR) $(UNIT_LD) -o $@ tools/ivi-probe.c \
 		$(GEN_DIR)/ivi-controller-protocol.c $(GEN_DIR)/ivi-application-protocol.c -lwayland-client -lwayland-egl -lEGL -lGLESv2 -lm
