@@ -46,7 +46,11 @@ assert(!r.error && navkey.matches(r.pairs, sv(9)) && !navkey.matches(r.pairs, na
     'from a SOME/IP field: NAV matches, MEDIA does not (' + r.text + ')');
 
 // ---- the map pack ----
-const file = process.argv[2] || path.join(APP, 'georgia.pack');
+// the map: the one given, else the built package's, else app.json's download in kit/tools/.osm-cache (build.py fetches it)
+const mapSpec = require(path.join(APP, 'app.json')).maps[0];
+const file = process.argv[2] || [path.join(ROOT, 'dist', 'osm_nav', 'source', 'javascript', mapSpec.file),
+    path.join(ROOT, 'kit', 'tools', '.osm-cache', mapSpec.gzSha256 + '.pack.gz')].find((p) => fs.existsSync(p));
+if (!file) { console.error('no map: run python3 kit/tools/build.py osm_nav first (it downloads it)'); process.exit(2); }
 const pack = MapPack.open(file);
 const router = new Router(pack, { cacheDir: os.tmpdir() });
 const at = (la, lo, h) => { const p = merc(la, lo); return router.snap(p[0], p[1], h, 500); };

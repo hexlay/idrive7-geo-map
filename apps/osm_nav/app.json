@@ -23,6 +23,20 @@
     "ID7"
   ],
   "maxDiskUsage": 268435456,
+  "mapsComment": "The map, kept out of git (hexlay/idrive7-geo-map-data releases): kit/tools/build.py downloads it (once, into kit/tools/.osm-cache), checks its size and SHA-256 and puts it into the package unpacked. A new map: a new release there and its numbers here.",
+  "maps": [
+    {
+      "file": "georgia.pack",
+      "url": "https://github.com/hexlay/idrive7-geo-map-data/releases/download/georgia-2026-11-07/georgia-2026-11-07.pack.gz",
+      "gzSize": 60652345,
+      "gzSha256": "43df3d70b08b0644f1909db2eec90b28d9010af61c3e412e7c0cc3e1463f1d83",
+      "size": 121838184,
+      "sha256": "b799e304ad01f36e3a5d15100bf60ac1cedaf400c9a2b09d197da68e3fe919e6",
+      "mirrors": [
+        "https://api.github.com/repos/hexlay/idrive7-geo-map-data/releases/assets/723632777"
+      ]
+    }
+  ],
   "memoryKB": 196608,
   "signals": {
     "de.bmw.infotainment.vehicle.Vehicle2": {

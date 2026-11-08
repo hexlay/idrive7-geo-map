@@ -13,7 +13,7 @@ The RHMI layout (application.xml + uiDescription.json) is GENERATED from the
 "screens" + "settings" in app.json, using only widget templates that BMW's own
 apps use on this firmware (see reference/rhmi-widget-cells.md).
 """
-import gzip, json, os, re, shutil, sys, tarfile, tempfile, uuid
+import gzip, json, os, re, shutil, sys, tarfile, tempfile, time, uuid
 from xml.sax.saxutils import escape
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pack_data  # noqa: E402
@@ -498,6 +498,101 @@ def build_start_widget(spec, app_id, icon_src, out):
     return {'component': comp, 'layout': ui['containers']['500']['components'][str(WIDGET_COMPONENT_ID)]['cells']['Widget']['value']}
 
 
+MAP_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.osm-cache')
+
+
+class _Hashing:
+    """A file object that counts and hashes what is read through it."""
+    def __init__(self, f):
+        import hashlib
+        self.f, self.h, self.n = f, hashlib.sha256(), 0
+
+    def read(self, k=-1):
+        b = self.f.read(k)
+        self.h.update(b)
+        self.n += len(b)
+        return b
+
+
+def _sha256_file(p):
+    import hashlib
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def fetch_maps(maps):
+    """Map packs an app needs (app.json "maps": file, url of the gzipped pack, gzSize, gzSha256, size, sha256 of
+    the pack unpacked), kept out of git (the MGU Store downloads the whole repo, at most 64 MB, and builds in at
+    most 200 MB). Each is downloaded once into kit/tools/.osm-cache/<gzSha256>.pack.gz, a MiB at a time (never the
+    whole file in RAM: this runs on the head unit), and checked by size and SHA-256. Returns [(map, gz path)]."""
+    import urllib.request
+    out = []
+    for m in maps:
+        os.makedirs(MAP_CACHE, exist_ok=True)
+        dst = os.path.join(MAP_CACHE, m['gzSha256'] + '.pack.gz')
+        if os.path.isfile(dst) and os.path.getsize(dst) == m['gzSize'] and _sha256_file(dst) == m['gzSha256']:
+            print('  %s: cached (%s)' % (m['file'], os.path.relpath(dst, ROOT)))
+            out.append((m, dst))
+            continue
+        tmp = dst + '.part'
+        # the release download, then the mirrors (the same file through GitHub's API: when github.com itself
+        # is slow for requests without a sign-in), each tried three times
+        urls = [m['url']] + list(m.get('mirrors', []))
+        errors = []
+        for url in urls:
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(5 * attempt * attempt)
+                print('  %s: downloading %.1f MB from %s%s' % (m['file'], m['gzSize'] / 1e6, url, ' (again)' if attempt else ''))
+                try:
+                    req = urllib.request.Request(url, headers={'Accept': 'application/octet-stream', 'User-Agent': 'idrive7-geo-map-build'})
+                    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, 'wb') as f:
+                        hr = _Hashing(r)
+                        for b in iter(lambda: hr.read(1 << 20), b''):
+                            f.write(b)
+                            if hr.n > m['gzSize']:
+                                break
+                    if hr.n != m['gzSize'] or hr.h.hexdigest() != m['gzSha256']:
+                        # a wrong file is not tried again from the same place
+                        errors.append('%s: does not match its size and SHA-256 (%d bytes)' % (url, hr.n))
+                        break
+                    os.replace(tmp, dst)
+                    break
+                except Exception as e:  # noqa: BLE001 - network: retried, then reported
+                    errors.append('%s: %s' % (url, e))
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+            if os.path.isfile(dst):
+                break
+        if not os.path.isfile(dst):
+            sys.exit('%s: could not download the map:\n    %s' % (m['file'], '\n    '.join(errors[-6:])))
+        out.append((m, dst))
+    return out
+
+
+def unpack_map(m, gz, fileobj_out=None, tf=None, arcname=None):
+    """The map pack unpacked from its .gz, checked by size and SHA-256 as it goes: into fileobj_out, or as member
+    arcname of tarfile tf (straight from the .gz: the 122 MB unpacked pack never lands in the build folder)."""
+    with gzip.open(gz, 'rb') as g:
+        hr = _Hashing(g)
+        if tf is not None:
+            ti = tarfile.TarInfo(arcname)
+            ti.size, ti.mode, ti.mtime = m['size'], 0o644, 0
+            ti.uid = ti.gid = 0
+            ti.uname = ti.gname = 'root'
+            tf.addfile(ti, hr)
+        else:
+            for b in iter(lambda: hr.read(1 << 20), b''):
+                fileobj_out.write(b)
+        extra = g.read(1)
+    if extra or hr.n != m['size'] or hr.h.hexdigest() != m['sha256']:
+        sys.exit('%s: the unpacked map does not match its size and SHA-256' % m['file'])
+
+
 def build(app_id, language='en'):
     spec = json.load(open(os.path.join(APPS, app_id, 'app.json'), encoding='utf-8'))
     spec = localize_spec(spec, language)
@@ -551,9 +646,21 @@ def build(app_id, language='en'):
     # app code
     adir = os.path.join(APPS, app_id)
     fetch_assets(adir, spec.get('assets', []))
+    # map packs (app.json "maps"): in the MGU Store (MGU_OUT set) they are streamed into the package below, so the
+    # build folder holds only the download; elsewhere (PC preview, emulator) also unpacked into source/javascript/
+    maps = fetch_maps(spec.get('maps', []))
+    in_store = bool(os.environ.get('MGU_OUT'))
+    map_files = set(m['file'] for m, _ in maps)
+    for m, gz in maps:
+        if not in_store:
+            with open(os.path.join(src, 'javascript', m['file']), 'wb') as out:
+                unpack_map(m, gz, fileobj_out=out)
+            print('  %s: unpacked (%.1f MB), checked' % (m['file'], m['size'] / 1e6))
     for f in sorted(os.listdir(adir)):
         if f.startswith('.') or f in ('node_modules', '__pycache__') or f.endswith(('_auth.json', '_push.json')):
             continue   # editor/OS junk, local dependencies and local secrets never go into a package
+        if f in map_files:
+            continue   # a local copy of a map pack: the one app.json "maps" names goes in, checked
         if f.endswith('.js'):
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', 'app.js' if f == 'main.js' else f))
         elif f.endswith(('.wasm', '.wad')) or f in ('LICENSE', 'NOTICE'):
@@ -573,7 +680,7 @@ def build(app_id, language='en'):
             raw, size, _ = pack_data.pack(os.path.join(adir, f), os.path.join(src, 'javascript', f + '.pack'))
             print('  %s/: %.1f MB packed to %.2f MB' % (f, raw / 1e6, size / 1e6))
         elif f.endswith('.pack') and not os.path.isdir(os.path.join(adir, f[:-5])):
-            # a committed pack (e.g. dtc_scanner/dtc_db.pack, osm_nav/georgia.pack); if gzipped for GitHub's
+            # a committed pack (e.g. dtc_scanner/dtc_db.pack; map packs come from app.json "maps"); if gzipped for GitHub's
             # 100 MB limit, decompress into the built package so the car reads raw bytes without gunzip RAM
             p_src = os.path.join(adir, f)
             p_dst = os.path.join(src, 'javascript', f)
@@ -695,15 +802,28 @@ def build(app_id, language='en'):
 
     # --- archives ---
     os.makedirs(DIST, exist_ok=True)
+    # the MGU Store installs the .tgz alone: there the .mgu (the same files again) is not made, which keeps the
+    # build folder under the store's 200 MB, and the map packs go into the .tgz straight from their download
     bundle = os.path.join(DIST, f'{app_id}@{ver}.mgu')
-    with gz_header_free(bundle) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
-        for n in ('meta.json', 'source', 'rhmiData', 'rhmiDataStartWidget', 'oapgen'):
-            if os.path.exists(os.path.join(stage, n)):
-                tf.add(os.path.join(stage, n), arcname=n, filter=tar_clean)
+    if not in_store:
+        with gz_header_free(bundle) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
+            for n in ('meta.json', 'source', 'rhmiData', 'rhmiDataStartWidget', 'oapgen'):
+                if os.path.exists(os.path.join(stage, n)):
+                    tf.add(os.path.join(stage, n), arcname=n, filter=tar_clean)
     npm = os.path.join(DIST, f'{app_id}@{ver}.tgz')
-    with gz_header_free(npm) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
-        tf.add(src, arcname='package', filter=tar_clean)
-    print(f'{app_id} {ver}: {os.path.relpath(bundle, ROOT)} ({os.path.getsize(bundle) // 1024} KiB), '
+    try:
+        with gz_header_free(npm) as gz, tarfile.open(fileobj=gz, mode='w') as tf:
+            tf.add(src, arcname='package', filter=tar_clean)
+            if in_store:
+                for m, mgz in maps:
+                    unpack_map(m, mgz, tf=tf, arcname='package/javascript/' + m['file'])
+                    print('  %s: into the package from its download (%.1f MB), checked' % (m['file'], m['size'] / 1e6))
+    except BaseException:
+        if os.path.exists(npm):
+            os.remove(npm)        # never a package with a map cut short or not matching
+        raise
+    made = npm if in_store else bundle
+    print(f'{app_id} {ver}: {os.path.relpath(made, ROOT)} ({os.path.getsize(made) // 1024} KiB), '
           f'{len(uidesc["containers"])} screens, states {state_ids}')
 
 

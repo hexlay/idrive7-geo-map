@@ -55,3 +55,7 @@ apps/osm_nav/.*.raw
 apps/osm_nav/.*.rtr
 apps/osm_nav/osm_nav_*.json
 osm_nav_*.json
+
+# map packs: not in git (hexlay/idrive7-geo-map-data releases, app.json "maps"; build.py downloads them)
+apps/*/*.pack
+apps/*/*.pack.gz
