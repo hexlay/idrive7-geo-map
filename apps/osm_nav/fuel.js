@@ -35,6 +35,8 @@ class Fuel {
         const dl = Number(process.env.OSM_NAV_DEMO_FUEL);
         this.demo = { litres: dl > 4 && dl < 120 ? dl : 41, l100: 7.9 };
         this.listeners = [];
+        this.base = undefined;      // refuel check: tank level when the car stopped (null while driving)
+        this.parked = undefined;    // unknown until the position says
     }
 
     start() {
@@ -50,10 +52,8 @@ class Fuel {
                 const rangeKm = typeof v.range === 'number' && v.range < 4095 ? v.range : null;
                 const odoKm = typeof v.mileageKilometre === 'number' && v.mileageKilometre > 0 && v.mileageKilometre < 16777215 ? v.mileageKilometre : null;
                 if (litres === null && rangeKm === null) return;
-                const prev = this.car;
                 this.car = { litres, rangeKm, odoKm, at: Date.now() };
-                // refuelled: the tank went up by more than 4 l
-                if (prev && prev.litres !== null && litres !== null && litres - prev.litres > 4) this.listeners.forEach((fn) => { try { fn('refuelled'); } catch (e) { /* ignore */ } });
+                this._checkRefuel(litres);
             },
             statusBordcomputerAverage: (v) => {
                 const r = v && v.consumptionAverage1BC1, unit = v && CONS_UNITS[v.statusUnitOfMeasurementConsumptionBC];
@@ -73,9 +73,48 @@ class Fuel {
         this.stopped = true;
         (this.subs || []).forEach((s) => { try { s.shutdown(); } catch (e) { /* ignore */ } });
         this.subs = null;
+        this._saveLevel();
     }
 
     onEvent(fn) { this.listeners.push(fn); }
+
+    /** The car's speed (km/h), from the position: a refuel only counts while the car stands. */
+    setSpeed(kmh) {
+        const parked = typeof kmh === 'number' && kmh < 3;
+        if (parked && !this.parked && this.car && typeof this.car.litres === 'number' && this.base === null) this.base = this.car.litres;
+        if (!parked) { this.base = null; this.filled = false; }     // driving: fuel sloshes on hills, nothing counts
+        this.parked = parked;
+    }
+
+    /**
+     * Refuelled: the tank more than 4 l above its level when the car stopped (or at the last shutdown: the
+     * app usually is not running while the engine is off at the pump). A pump fills gradually, so it is the
+     * rise since then that counts, not the step between two readings.
+     */
+    _checkRefuel(litres) {
+        if (typeof litres !== 'number') return;
+        if (this.base === undefined) {
+            // the first reading of this run: the level saved at the last shutdown is the base
+            const saved = this._loadLevel();
+            this.base = saved !== null ? saved : litres;
+        }
+        if (this.parked === false || this.base === null || this.filled) return;
+        if (litres - this.base > 4) {
+            this.filled = true;             // once a stop: the pump goes on filling
+            this.listeners.forEach((fn) => { try { fn('refuelled'); } catch (e) { /* ignore */ } });
+        } else if (litres < this.base) this.base = litres;
+    }
+
+    _levelFile() { return this.ctx.dataDir ? require('path').join(this.ctx.dataDir, 'osm_nav_fuel.json') : null; }
+    _loadLevel() {
+        const f = this._levelFile();
+        try { const j = JSON.parse(require('fs').readFileSync(f, 'utf8')); return typeof j.litres === 'number' ? j.litres : null; } catch (e) { return null; }
+    }
+    _saveLevel() {
+        const f = this._levelFile();
+        if (!f || !this.car || typeof this.car.litres !== 'number') return;
+        try { require('fs').writeFileSync(f, JSON.stringify({ litres: this.car.litres, at: Date.now() })); } catch (e) { /* read-only (preview) */ }
+    }
 
     /** The demo drive used dKm of fuel's worth of road (called each frame while the demo drives). */
     demoDrive(dKm) {
@@ -148,11 +187,13 @@ function stationsAlong(route, fromS, stations, opts) {
  * stops), else the first one ahead (range too short for any with the reserve: the nearest is best).
  */
 function pickStop(along, rangeKm, fromS) {
-    if (!along || !along.length) return null;
+    // only stations still ahead (the list may have been made further back on the route)
+    const ahead = (along || []).filter((a) => a.s >= fromS);
+    if (!ahead.length) return null;
     const reach = fromS + (rangeKm - STOP_RESERVE_KM) * 1000;
     let pick = null;
-    for (const a of along) if (a.s <= reach) pick = a;
-    return pick || along[0];
+    for (const a of ahead) if (a.s <= reach) pick = a;
+    return pick || ahead[0];
 }
 
 /** Low-fuel pick with no route: the nearest station roughly ahead (or very close), else the nearest. */

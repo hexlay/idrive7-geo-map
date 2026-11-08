@@ -72,6 +72,7 @@ mgu.run({
         const fuel = new FU.Fuel(ctx);
         // the position and the fuel level are followed together: on screen, with guidance or the widget
         const track = (on) => { if (on) { pos.start(); fuel.start(); } else { pos.stop(); fuel.stop(); } };
+        pos.onFix((f) => { if (f.source !== 'demo') fuel.setSpeed(f.speed); });
         const search = pack ? new Search(pack, ctx.dataDir) : null;
 
         /* ---------- state ---------- */
@@ -354,6 +355,8 @@ mgu.run({
                 dest: S.dest, avoid, scale: Math.max(1, k / 1.2),
                 pins: [S.sel ? { x: S.sel.x, y: S.sel.y, color: '#1f6fd6' } : null, S.stop ? { x: S.stop.x, y: S.stop.y, color: '#d97706' } : null].filter(Boolean),
             });
+            // read the tiles ahead one a frame while driving (no burst of reads when a new area comes into view)
+            if (S.follow && fix && fix.speed > 5) view.prefetch(fix.x, fix.y, fix.heading, 1);
             if (S.crosshair) {
                 const c = '#ffffff';
                 cv.circle(vp.cx, vp.cy, sz(16), withAlpha('#000000', 0.25));
@@ -980,11 +983,35 @@ mgu.run({
                 .then((s) => log.info('nav button: ' + navCfg.iface + '.' + navCfg.field + (s.error ? ' error: ' + s.error : ' subscribed')));
         }
 
+        /*
+         * ---------- memory: the target is under 150 MB (MainApp's limit, app.json memoryKB, is 192 MB) ----------
+         * Checked every minute and written to the log every 10 minutes (what the car really uses). Over 140 MB
+         * the caches are cut back: map tiles, names, shapes and the drawing buffers fill again as needed.
+         */
+        let memLogAt = 0, memTrimAt = 0;
+        const memCheck = () => {
+            const m = process.memoryUsage(), mb = (v) => Math.round(v / 1048576), now = Date.now();
+            if (now - memLogAt > 600000) {
+                memLogAt = now;
+                log.info('memory: rss ' + mb(m.rss) + ' MB, heap ' + mb(m.heapUsed) + ' MB, buffers ' + mb(m.external) + ' MB, tiles ' + packs.reduce((a, p) => a + p._tiles.size, 0));
+            }
+            if (m.rss > 140 * 1048576 && now - memTrimAt > 30000) {
+                memTrimAt = now;
+                packs.forEach((p) => p.trim());
+                view.trim();
+                log.warn('memory: rss ' + mb(m.rss) + ' MB is over 140 MB: caches cut back');
+            }
+        };
+        const memTimer = setInterval(memCheck, 60000);
+        if (memTimer.unref) memTimer.unref();
+        setTimeout(memCheck, 5000).unref();
+
         /* ---------- car sleep / shutdown safety (zero battery drain) ---------- */
         let cleanedUp = false;
         const cleanup = () => {
             if (cleanedUp) return;
             cleanedUp = true;
+            clearInterval(memTimer);
             try { track(false); } catch (e) {}
             try { if (navSrv) navSrv.close(); } catch (e) {}
             try { packs.forEach((p) => p && p.close && p.close()); } catch (e) {}
@@ -1057,7 +1084,9 @@ mgu.run({
         const fps = () => {
             const max = Number(settings.get('fps')) || 60, fix = pos.fix();
             const moving = (fix && fix.speed > 0.5) || Math.abs(zoomWant - zoomLog) > 0.01 || page === 1 || (S.toast && Date.now() < S.toast.until) || S.crosshair || !!S.learn;
-            return page === 2 && !moving ? 6 : moving ? max : 4;
+            // the route overview and country zoom draw the most and change the least: 15 fps, unless a finger is on it
+            const far = page === 0 && (S.overview || view.camera.mpp > 40) && Date.now() - S.lastTouch > 1500;
+            return page === 2 && !moving ? 6 : moving ? (far ? Math.min(max, 15) : max) : 4;
         };
         ui.onVisible((name, v) => {
             if (name !== 'MAIN') return;

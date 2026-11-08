@@ -70,6 +70,9 @@ class MapView {
 
     level(mpp) { return mpp > 40 ? 0 : mpp > 3.2 ? 1 : 2; }
 
+    /** Memory is short: the per-colour triangle buffers go (the next frame makes them again, as big as it needs). */
+    trim() { this.tri = {}; }
+
     /** World point -> screen (into out[0], out[1]) with the current frame's transform. */
     toScreen(x, y, out) {
         const T = this.T;
@@ -104,6 +107,7 @@ class MapView {
         this.gs = gs;
         const lv = this.level(mpp);
         this.stats = { roads: 0, segs: 0, tris: 0, labels: 0, level: lv };
+        if (this.cullOverride === undefined) this.cullArea = lv === 0 ? 2.5 : mpp > 20 ? 1.5 : 0;
         r.clip(vp.x, vp.y, vp.w, vp.h);
         r.fillRect(vp.x, vp.y, vp.w, vp.h, S.bg);
         // the world box the viewport shows (rotated: the box round its four corners)
@@ -152,6 +156,31 @@ class MapView {
         return this.stats;
     }
 
+    /**
+     * Read ahead: the tiles just past the edge of the view in the way the car drives, at most max a call
+     * (one a frame), so driving into a new area does not read half a dozen tiles in one frame (a stutter).
+     * Returns how many were read.
+     */
+    prefetch(x, y, heading, max) {
+        const lv = this.level(this.camera.mpp), vp = this.lastVp;
+        if (!vp) return 0;
+        const h = (heading || 0) * Math.PI / 180, reach = Math.hypot(vp.w, vp.h) * 0.6 * this.camera.mpp;
+        let n = 0;
+        for (const P of this.packs) {
+            const size = P.levels[lv].size;
+            // two points ahead: the view's edge, and one tile past it
+            for (const d of [reach, reach + size]) {
+                const px = x + Math.sin(h) * d, py = y + Math.cos(h) * d;
+                const c0 = Math.floor(px / size), r0 = Math.floor(py / size);
+                for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+                    if (n >= (max || 1)) return n;
+                    if (!P.hasTile(lv, c0 + dc, r0 + dr)) { P.tile(lv, c0 + dc, r0 + dr); n++; }
+                }
+            }
+        }
+        return n;
+    }
+
     /** Affine transform of a tile's coordinates to the screen: sx = A qx + B qy + C, sy = D qx + E qy + F. */
     _aff(t) {
         const T = this.T, k = t.unit / T.mpp, ox = (t.x0 - T.camx) / T.mpp, oy = (t.y0 - T.camy) / T.mpp;
@@ -161,6 +190,9 @@ class MapView {
     _areas(r, tiles) {
         const S = this.S, V = this.view;
         const bufs = {};
+        // zoomed out, most land-use triangles are smaller than a pixel (country: ~280k of forest): those are
+        // left out (twice the area in px^2 below this), which cuts what goes to the renderer several times
+        const cull = this.cullArea || 0;
         for (const { t, aff } of tiles) {
             const { A, B, C, D, E } = aff, Fo = aff.F;
             for (const a of t.areas) {
@@ -174,6 +206,7 @@ class MapView {
                     const x2 = A * q[i + 4] + B * q[i + 5] + C, y2 = D * q[i + 4] + E * q[i + 5] + Fo;
                     if ((x0 < V.x0 && x1 < V.x0 && x2 < V.x0) || (x0 > V.x1 && x1 > V.x1 && x2 > V.x1) ||
                         (y0 < V.y0 && y1 < V.y0 && y2 < V.y0) || (y0 > V.y1 && y1 > V.y1 && y2 > V.y1)) continue;
+                    if (cull) { const ar = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (ar < cull && ar > -cull) continue; }
                     if (b.n * 6 + 6 > b.xy.length) {
                         const nb = new Float32Array(b.xy.length * 2); nb.set(b.xy); b.xy = nb; this.tri[key] = nb;
                     }

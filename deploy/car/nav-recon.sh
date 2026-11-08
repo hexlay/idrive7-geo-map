@@ -35,6 +35,8 @@
 #      renderer, the KOMBI video stream) - and which process is which.
 #   3. The HMI binary: its eGfxId* / surface strings for Nav, Map, EmbeddedSurface, WelcomeApp.
 #   4. The stock map: the /mnt/map mount, ROOT.NDS / PRODUCT metadata (names, sizes, versions).
+#   3b. Build facts for the controller gate: C / C++ library versions, CommonAPI, the hook point, the
+#      gate as loaded now (build-facts.txt). 3c. Audio devices, processes and services (audio.txt).
 #   5. Processes and services that look like navigation, CarPlay / projection, the cluster or the
 #      HUD (names only, nothing is stopped), and every process's CPU over SAMPLE seconds
 #      (cpu.txt: what the stock navigation, the HMI and CarPlay cost).
@@ -52,7 +54,7 @@ LABEL=${LABEL:-}
 case "$LABEL" in *[!A-Za-z0-9_-]*) echo "nav-recon: LABEL: letters, digits, - and _ only" >&2; exit 1 ;; esac
 OUT=${OUT:-$(pwd)/nav-recon-${LABEL:+$LABEL-}$NOW}
 CATALOG=${CATALOG:-/etc/oap/someip/someip-interfaces.json}
-PATTERN=${PATTERN:-'[Pp]osition|[Gg][Nn][Ss][Ss]|[Gg][Pp][Ss]|[Nn]avi|[Gg]uidance|[Mm]aneuver|[Mm]anoeuvre|[Rr]oute|[Hh][Uu][Dd]|[Hh]ead[Uu]p|[Kk]ombi|[Ss]peed[Ll]imit|[Ss][Ll][Ii]|[Ee]horizon|[Ee]lectronicHorizon|[Hh]eading|[Gg]eo|[Ll]atitude|[Ll]ongitude|[Cc]ompass|[Tt]imeZone|FrontCCU|[Cc]ontrol[Ee]lement|[Hh]ard[Kk]ey|[Bb]utton|[Cc]ar[Pp]lay|[Pp]rojection|[Ss]martphone[Ii]ntegration|[Tt]urn[Bb]y[Tt]urn|[Rr]oute[Gg]uidance|[Ii]nstrument[Cc]luster|[Ee]xternal[Nn]av|[Aa]ndroid[Aa]uto'}
+PATTERN=${PATTERN:-'[Pp]osition|[Gg][Nn][Ss][Ss]|[Gg][Pp][Ss]|[Nn]avi|[Gg]uidance|[Mm]aneuver|[Mm]anoeuvre|[Rr]oute|[Hh][Uu][Dd]|[Hh]ead[Uu]p|[Kk]ombi|[Ss]peed[Ll]imit|[Ss][Ll][Ii]|[Ee]horizon|[Ee]lectronicHorizon|[Hh]eading|[Gg]eo|[Ll]atitude|[Ll]ongitude|[Cc]ompass|[Tt]imeZone|FrontCCU|[Cc]ontrol[Ee]lement|[Hh]ard[Kk]ey|[Bb]utton|[Cc]ar[Pp]lay|[Pp]rojection|[Ss]martphone[Ii]ntegration|[Tt]urn[Bb]y[Tt]urn|[Rr]oute[Gg]uidance|[Ii]nstrument[Cc]luster|[Ee]xternal[Nn]av|[Aa]ndroid[Aa]uto|[Aa]udio[Mm]anag|[Aa]udio[Ss]ource|[Ss]peech|[Pp]rompt|[Aa]nnouncement'}
 BUTTONS=${BUTTONS:-0}
 SNIFF=${SNIFF:-0}
 SAMPLE=${SAMPLE:-10}
@@ -200,6 +202,43 @@ else
     say "HMI: HmiMain3D not found"
 fi
 
+# ---- 3b. build facts for the controller gate (mgu-inputgate.so, LD_PRELOAD into the HMI) --------------
+# A gate built for another C library, C++ library or CommonAPI would not load (or worse) - what it must match:
+{
+    echo "== C library";   { ldd --version 2>&1 || /lib/libc.so.6 2>&1; } | head -n 2
+    echo "== C++ library"; ls -l /usr/lib/libstdc++.so* /lib/libstdc++.so* 2>/dev/null
+    for l in /usr/lib/libstdc++.so.6 /lib/libstdc++.so.6; do [ -r "$l" ] && grep -aoE 'GLIBCXX_[0-9.]+' "$l" | sort -t. -k3 -n -u | tail -n 3; done
+    echo "== vsomeip / CommonAPI"; ls -l /usr/lib/libvsomeip* /usr/lib/libCommonAPI* 2>/dev/null
+    if [ -n "$HMI" ]; then
+        echo "== HmiMain3D libraries"; ldd "$HMI" 2>&1 | grep -Ei 'CommonAPI|vsomeip|stdc|libc\.|boost' | head -n 40
+        SYM=_ZN9CommonAPI6SomeIP10Connection18handleProxyReceiveERKSt10shared_ptrIN7vsomeip7messageEE
+        for l in $(ldd "$HMI" 2>/dev/null | awk '/CommonAPI-SomeIP/ {print $3}'); do
+            echo "== $l has the gate's hook point: $(grep -ac "$SYM" "$l" 2>/dev/null)"
+        done
+    fi
+    echo "== the gate now"
+    for d in /proc/[0-9]*; do
+        case "$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" in *HmiMain3D*)
+            echo "HmiMain3D pid ${d#/proc/}: $(tr '\0' '\n' < "$d/environ" 2>/dev/null | grep '^LD_PRELOAD=')"
+            grep -o '/[^ ]*mgu-inputgate[^ ]*' "$d/maps" 2>/dev/null | sort -u ;;
+        esac
+    done
+    ls -l /var/opt/mgu-inputgate/ 2>/dev/null
+} > "$OUT/build-facts.txt" 2>&1
+say "build facts: C / C++ library, CommonAPI and the gate as loaded now (build-facts.txt)"
+
+# ---- 3c. audio, for spoken turn prompts later: who plays sound and how the HMI mixes it ---------------
+{
+    echo "== sound devices"; ls -l /dev/snd 2>/dev/null; cat /proc/asound/cards 2>/dev/null; command -v aplay >/dev/null && aplay -l 2>&1 | head -n 40
+    echo "== processes"
+    for d in /proc/[0-9]*; do
+        cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c 1-200)
+        case "$cmd" in *[Aa]udio*|*[Ss]ound*|*pulse*|*pipewire*|*[Tt][Tt][Ss]*|*[Ss]peech*|*[Pp]rompt*|*[Aa]nnounce*|*[Mm]ixer*) echo "${d#/proc/}  $cmd" ;; esac
+    done
+    echo "== services"; command -v systemctl >/dev/null 2>&1 && systemctl list-units --all --no-pager 2>/dev/null | grep -Ei 'audio|sound|tts|speech|prompt|pulse'
+} > "$OUT/audio.txt" 2>&1
+say "audio: $(grep -c '^[0-9]' "$OUT/audio.txt" 2>/dev/null) audio-like processes (audio.txt)"
+
 # ---- 4. the stock map ----------------------------------------------------------------------------
 { mount | grep -Ei 'map|nds|navi'; echo; df -h 2>/dev/null | grep -Ei 'map|nds|navi|Filesystem'; } > "$OUT/map-mounts.txt" 2>&1
 for m in /mnt/map /mnt/navdata /mnt/data/map; do
@@ -287,6 +326,8 @@ Next steps
       - a SOME/IP field of FrontCCU (someip-navigation.txt): put it in app.json "config.navButton"
         { "iface": "...FrontCCU", "field": "<field>" } and in "signals" with "_optional".
     Put Navigation's widget on the home screen: MainApp then starts the app with the car, so NAV works from the start.
+  * build-facts.txt: what a controller gate with the NAV hook must be built for (C / C++ library, CommonAPI,
+    the hook point) and whether a gate is loaded now. audio.txt: who plays sound, for spoken prompts later.
   * cpu.txt: what each process costs now. Run once with the stock map on screen and once with Navigation
     (osm_nav) in front: the difference is what the stock map costs while it is covered.
   * The cluster map and HUD arrows: two runs, LABEL=base and LABEL=carplay (CarPlay guiding, its map in the

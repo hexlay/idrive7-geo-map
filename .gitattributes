@@ -1,0 +1,15 @@
+# Files that run on the head unit (Linux) must keep Unix line endings in every checkout, also on Windows
+# (core.autocrlf=true would otherwise turn them into CRLF, and sh on the car fails on the \r).
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# binaries
+*.pack binary
+*.so binary
+*.png binary
+*.wasm binary
+*.gz binary
+*.tgz binary
+*.mgu binary
+kit/renderd/prebuilt/mgu-renderd binary

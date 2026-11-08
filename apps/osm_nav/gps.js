@@ -98,11 +98,15 @@ class Position {
         } catch (e) { this.saved = null; }
     }
 
-    /** demo wanted: the setting, or auto while no car signal has come (only when visible or in preview) */
+    /**
+     * demo wanted: the setting "on", or "auto" off the car (PC preview, emulator) while no car signal has
+     * come. On the car (MainApp runs the app: ctx.app) "auto" never starts it: a silent signal must
+     * show "no position", not a simulated drive with guidance.
+     */
     wantDemo() {
         const m = this.ctx.settings.get('demo');
         if (m === 'on') return true;
-        if (m === 'off') return false;
+        if (m === 'off' || this.ctx.app) return false;
         const vis = this.ctx.ui && this.ctx.ui.isVisible && this.ctx.ui.isVisible('MAIN');
         return !!this.ctx.previewDemo || (vis && !this.carSeen && Date.now() - (this.t0 || Date.now()) > 3000);
     }

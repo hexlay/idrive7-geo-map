@@ -3,6 +3,7 @@
 // field's encoding chosen by the installed map (gps.js), and routing, guidance and search on the map pack.
 //   node kit/tools/test_osm_nav.js [map.pack]
 const assert = require('assert');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Module = require('module');
@@ -88,9 +89,26 @@ fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 22, range: 280, mileageKilomet
 fuelH.statusBordcomputerAverage({ consumptionAverage1BC1: 79, statusUnitOfMeasurementConsumptionBC: 1 });
 let fs0 = fuel.state(false);
 assert(fs0.litres === 22 && fs0.rangeKm === 280 && fs0.source === 'car' && Math.abs(fs0.cons.value - 7.9) < 1e-9 && fs0.cons.unit === 'l/100 km', 'tank, range, consumption: ' + JSON.stringify(fs0));
-fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 58, range: 760, mileageKilometre: 81240 });
-assert.strictEqual(refuelled, 1, 'the tank going up is a refuel');
+const tank = (l) => fuelH.statusRangeTankStatus({ fluidLevelFuelTank: l, range: l * 12, mileageKilometre: 81240 });
+fuel.setSpeed(70);
+tank(28); tank(21); tank(29);
+assert.strictEqual(refuelled, 0, 'fuel sloshing on a hill while driving is no refuel');
+fuel.setSpeed(0);
+tank(22);
+[23, 24, 26, 28, 31, 40, 58].forEach(tank);
+assert.strictEqual(refuelled, 1, 'parked, the pump filling it step by step: one refuel');
 fuel.stop();
+// the engine off at the pump (the app not running): the level at the last shutdown is the base
+const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'osm-fuel-'));
+fs.writeFileSync(path.join(fdir, 'osm_nav_fuel.json'), JSON.stringify({ litres: 9 }));
+const fuel2 = new FU.Fuel(Object.assign({}, fctx, { dataDir: fdir }));
+let refuelled2 = 0;
+fuel2.onEvent((e) => { if (e === 'refuelled') refuelled2++; });
+fuel2.start();
+fuelH.statusRangeTankStatus({ fluidLevelFuelTank: 55, range: 700, mileageKilometre: 81250 });
+assert.strictEqual(refuelled2, 1, 'filled up while the app was off: seen at the next start');
+fuel2.stop();
+assert.strictEqual(JSON.parse(fs.readFileSync(path.join(fdir, 'osm_nav_fuel.json'), 'utf8')).litres, 55, 'the level is kept at shutdown');
 assert(FU.arrivalKm(280, far.length) < 0, 'Tbilisi - Batumi on 280 km: short (' + Math.round(FU.arrivalKm(280, far.length)) + ' km)');
 const stations = s.near([10], here, 100000);
 assert(stations.length > 50, 'fuel stations in the map: ' + stations.length);
@@ -104,6 +122,7 @@ assert(stop && stop.s <= (280 - FU.STOP_RESERVE_KM) * 1000 && stop.s > 100000, '
 const via = router.snap(stop.st.x, stop.st.y, null, 400);
 const viaRoute = router.route(a, at(41.6168, 41.6367), { vias: [via] });
 assert(viaRoute && viaRoute.length >= far.length - 50 && viaRoute.length < far.length + 5000, 'the route through the stop is about as long: ' + Math.round(viaRoute.length / 1000) + ' km');
+const late = FU.pickStop(along, 280, along[along.length - 1].s + 1);assert.strictEqual(late, null, 'every station already passed: none picked (never one behind the car)');const mid = along[Math.floor(along.length / 2)].s;assert(FU.pickStop(along, 280, mid).s >= mid, 'part way along: a station ahead');
 assert.strictEqual(FU.pickStop(along, 25, 0), along[0], 'too little for any with the reserve: the first one ahead');
 const ahead = FU.nearestAhead(s.near([10], here, 8), { x: here.x, y: here.y, heading: 0, speed: 0 }, 0.75);
 assert(ahead && ahead.kind === 10, 'parked, low fuel: the nearest station');
@@ -116,6 +135,7 @@ assert(close(pos._autoScale(41.6934, 44.8015, 'deg'), 41.6934, 44.8015), 'degree
 assert(close(pos._autoScale(416934000, 448015000, 'e7'), 41.6934, 44.8015), '1e-7 degrees');
 assert(close(pos._autoScale(Math.round(41.6934 * 2147483648 / 180), Math.round(44.8015 * 2147483648 / 180), 'semi'), 41.6934, 44.8015), 'semicircles (not taken for 1e-7 degrees)');
 assert.strictEqual(pos._autoScale(48.85, 2.35, 'paris'), null, 'a fix on no installed map: not used');
+// the demo drive: never by itself on the car (MainApp: ctx.app), only off the car or when chosenconst demoCtx = (app, mode) => ({ app, previewDemo: true, log: ctx.log, dataDir: os.tmpdir(), spec: { config: {} }, settings: { get: () => mode }, ui: { isVisible: () => true } });const mk = (app, mode) => new Position(demoCtx(app, mode), { pack, router, packs: () => [pack], route: () => null });assert.strictEqual(mk({ on() {} }, 'auto').wantDemo(), false, 'on the car, auto: no demo drive (no position instead)');assert.strictEqual(mk(null, 'auto').wantDemo(), true, 'PC preview, auto: the demo drive');assert.strictEqual(mk({ on() {} }, 'on').wantDemo(), true, 'on the car, chosen in Settings: the demo drive');
 pack.close && pack.close();
 console.log('osm_nav: all checks passed (Tbilisi - Batumi ' + Math.round(far.length / 1000) + ' km in ' + far.searchMs + ' ms; '
     + along.length + ' of ' + stations.length + ' fuel stations along it in ' + alongMs + ' ms, stop at ' + Math.round(stop.s / 1000) + ' km)');

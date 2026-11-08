@@ -93,6 +93,14 @@ class MapPack {
         this.mbox = this.meta.mbox;
     }
 
+    /** Memory is short: the caches down to what the view in front needs (they fill again as it draws). */
+    trim() {
+        const keep = Math.floor(this.maxTiles / 2);
+        while (this._tiles.size > keep) this._tiles.delete(this._tiles.keys().next().value);
+        this._names.clear();
+        if (this._shapes) this._shapes.clear();
+    }
+
     close() {
         if (this.fd != null) {
             try { fs.closeSync(this.fd); } catch (e) {}
@@ -174,6 +182,13 @@ class MapPack {
         const s = this.sec['TIL' + lv];
         const n = this.u32(s.off);
         return { off: s.off, n, keys: this._u32a(s.off + 4, n * 3) };
+    }
+    /** Is this tile read already (or known empty)? (prefetching asks before it reads) */
+    hasTile(lv, col, row) {
+        const L = this.levels[lv];
+        const c = col - L.col0, r = row - L.row0;
+        if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return true;
+        return this._tiles.has(lv * 1e9 + r * L.cols + c);
     }
     /** Tile col, row (absolute, Web Mercator / tile size) of level lv; null when the pack has none there. */
     tile(lv, col, row) {
