@@ -308,12 +308,31 @@ static void hmi_probe(struct ivi_controller *c, uint32_t id) {
  * one line each. Read only: these handles only listen (no set_*); the surfaces are the compositor's. */
 static navwatch_surf nw[NAVWATCH_MAX];
 static struct ivi_controller_surface *nw_s[NAVWATCH_MAX];
-static int nw_full_said;
-static void nw_tell(int i) {
-    if (!navwatch_due(&nw[i])) return;
+static int nw_full_said, nw_up;
+static uint64_t nw_probe_at;
+static void nw_send(int i) {
     char line[160];
     int n = navwatch_line(line, sizeof line, (long)(now_us() / 1000), &nw[i]);
-    if (n > 0) navwatch_send("mgu-nav-buttons", line, (size_t)n);      /* nobody listening: refused at once */
+    /* nobody listening: refused at once; what it missed is told again when someone listens (nw_check) */
+    if (n > 0 && navwatch_send("mgu-nav-buttons", line, (size_t)n) != 0) nw_up = 0;
+}
+static void nw_tell(int i) {
+    if (navwatch_due(&nw[i])) nw_send(i);
+}
+/* every 2 s: is osm_nav listening? When it starts to (at boot it starts after us; after a restart it knows
+   nothing), every surface's state is told once, so a stock map shown since before is known too */
+static void nw_check(void) {
+    if (!cfg.nav_watch) return;
+    uint64_t t = now_us();
+    if (t < nw_probe_at) return;
+    nw_probe_at = t + 2000000;
+    int up = navwatch_probe("mgu-nav-buttons") == 0;
+    if (up && !nw_up) {
+        nw_up = 1;
+        int n = 0;
+        for (int i = 0; i < NAVWATCH_MAX; i++) if (navwatch_mark(&nw[i])) { nw_send(i); n++; }
+        log_info("nav_watch: a listener at @mgu-nav-buttons: told %d surfaces", n);
+    } else if (!up) nw_up = 0;
 }
 static void nw_visibility(void *d, struct ivi_controller_surface *s, int32_t v) {
     (void)s;
@@ -1806,6 +1825,7 @@ int main(int argc, char **argv) {
         if (pf[2].revents & POLLIN) touch_read();
         if (pf[3].revents & (POLLIN | POLLHUP)) { if (gate_read() != 0) update_all(); }
         if (pf[4].revents & POLLIN) ccu_read();
+        nw_check();
         embed_dispatch(&pf[5]);
         for (int k = 6; k < np; k++) {
             client *c = clients[map[k]];

@@ -24,6 +24,13 @@ int navwatch_due(navwatch_surf *s)
     return 1;
 }
 
+int navwatch_mark(navwatch_surf *s)
+{
+    if (!s->used || !s->have_vis) return 0;
+    s->sent = 0;
+    return navwatch_due(s);
+}
+
 int navwatch_line(char *buf, size_t n, long ms, const navwatch_surf *s)
 {
     char proc[32];
@@ -37,7 +44,8 @@ int navwatch_line(char *buf, size_t n, long ms, const navwatch_surf *s)
     return r < 0 || (size_t)r >= n ? -1 : r;
 }
 
-int navwatch_send(const char *name, const char *line, size_t len)
+/* a non-blocking connection to @<name>, or -1 (nobody listening: refused at once) */
+static int connect_abstract(const char *name)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) return -1;
@@ -47,10 +55,23 @@ int navwatch_send(const char *name, const char *line, size_t len)
     size_t nl = strlen(name);
     if (nl + 1 > sizeof a.sun_path) { close(fd); return -1; }
     memcpy(a.sun_path + 1, name, nl);           /* abstract: a leading NUL */
-    int r = -1;
-    if (connect(fd, (struct sockaddr *)&a, (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + nl)) == 0 &&
-        send(fd, line, len, MSG_DONTWAIT | MSG_NOSIGNAL) == (ssize_t)len)
-        r = 0;
+    if (connect(fd, (struct sockaddr *)&a, (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + nl)) != 0) { close(fd); return -1; }
+    return fd;
+}
+
+int navwatch_send(const char *name, const char *line, size_t len)
+{
+    int fd = connect_abstract(name);
+    if (fd < 0) return -1;
+    int r = send(fd, line, len, MSG_DONTWAIT | MSG_NOSIGNAL) == (ssize_t)len ? 0 : -1;
     close(fd);
     return r;
+}
+
+int navwatch_probe(const char *name)
+{
+    int fd = connect_abstract(name);
+    if (fd < 0) return -1;
+    close(fd);
+    return 0;
 }

@@ -64,11 +64,21 @@ int main(void)
     assert(navwatch_line(line, 10, 1, &s) == -1);
     printf("ok: \"%s\" (a yield surface marked y, a process name one word)\n", "12345 surface 4100 1 0 0 1920 720 - NaviMapRenderer");
 
+    /* the snapshot for a new listener: a surface already told is told again; one with no state yet is not */
+    assert(!navwatch_due(&s) && navwatch_mark(&s) && !navwatch_due(&s));
+    navwatch_surf none; memset(&none, 0, sizeof none); none.used = 1; none.id = 9;
+    assert(!navwatch_mark(&none));
+    puts("ok: the snapshot tells every surface with a state once, again");
+
+    assert(navwatch_probe("navwatch-test") == -1);          /* nobody listening */
     int l = listen_abstract("navwatch-test");
     n = navwatch_line(line, sizeof line, 7, &s);
     assert(navwatch_send("navwatch-test", line, (size_t)n) == 0);
     char got[200];
     assert(read_line(l, got, sizeof got) == n && !strcmp(got, line));
+    assert(navwatch_probe("navwatch-test") == 0);           /* listening: an empty connection, nothing sent */
+    assert(read_line(l, got, sizeof got) == 0);
+    puts("ok: the probe: no listener -1, a listener 0 with nothing sent to it");
     close(l);
     long t0 = ms();
     for (int i = 0; i < 500; i++) assert(navwatch_send("navwatch-test", line, (size_t)n) == -1);

@@ -1079,7 +1079,12 @@ mgu.run({
                 sock.on('error', () => {});
             });
             navSrv.on('error', (e) => log.warn('nav button listener: ' + e.message));
-            navSrv.listen('\0mgu-nav-buttons', () => log.info('nav button: listening on the controller gate feed' + (S.navKey ? ' (' + S.navKey.text + ')' : ' (not learned yet)')));
+            navSrv.listen('\0mgu-nav-buttons', () => {
+                log.info('nav button: listening on the controller gate feed' + (S.navKey ? ' (' + S.navKey.text + ')' : ' (not learned yet)'));
+                // mgu-render sees us within 2 s and tells every surface's state once: after that, a surface first
+                // seen shown is a new one (made when it opened), not one shown since before
+                setTimeout(() => follower.settled(), 3000).unref();
+            });
         }
         if (navCfg.iface && navCfg.field && ctx.signals && ctx.signals.watch) {
             const h = {};

@@ -30,5 +30,11 @@ int navwatch_due(navwatch_surf *s);
 int navwatch_line(char *buf, size_t n, long ms, const navwatch_surf *s);
 /* The line to @<name> (abstract socket): 0 sent, -1 nobody listening. Never waits. */
 int navwatch_send(const char *name, const char *line, size_t len);
+/* Is someone listening at @<name>? A connection opened and closed with nothing sent: 0 yes, -1 no. Never waits.
+ * mgu-render asks every 2 s; when the answer turns to yes (osm_nav started, or started again) it tells every
+ * surface's state once (navwatch_mark), since what it told before nobody heard. */
+int navwatch_probe(const char *name);
+/* s as told now, whatever was sent before (the snapshot for a new listener): 1 if it has a state to tell. */
+int navwatch_mark(navwatch_surf *s);
 
 #endif

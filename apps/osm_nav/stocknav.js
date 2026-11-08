@@ -78,11 +78,17 @@ class StockNavFollower {
         if (this.learning && !this.learning.result && now > this.learning.until) this.learning.result = this._learnPick();
     }
 
-    /** A source's state: 'surface' (from the surface lines) or 'someip'. Returns 'open' on a rising edge that counts. */
-    state(source, on, now) {
+    /**
+     * A source's state: 'surface' (from the surface lines) or 'someip'. Returns 'open' on a rising edge that counts.
+     * initial: the first report since Navigation started (mgu-render tells every surface once when it starts to
+     * listen; a SOME/IP field's first value): where things stand, not something the driver just opened.
+     */
+    state(source, on, now, initial) {
+        if (!(source in this.sources) && initial === undefined) initial = true;   // a SOME/IP field's first value
         this.sources[source] = !!on;
         const was = this.active;
         this.active = Object.keys(this.sources).some((k) => this.sources[k]);
+        if (initial) { if (this.active !== was) this.changedAt = now; return null; }
         if (this.active === was) { this._rearm(now); return null; }
         this.changedAt = now;
         // rule A: the stock map hid after Navigation left (BACK, then away from it too): the next showing counts
@@ -94,14 +100,19 @@ class StockNavFollower {
     /** A surface line (parseSurface()). Returns 'open' when Navigation should open now. */
     surface(r, now) {
         if (!r) return null;
+        const first = !this.surfaces.has(r.id);
         this.surfaces.set(r.id, r);
-        if (this.learning) { this._learnSeen(r, now); return null; }
+        if (this.learning) { this._learnSeen(r, now, first); return null; }
         if (!this._isStock(r)) return null;
         // more than one surface may match a process name: the stock map is shown if any of them is
         let on = false;
         for (const s of this.surfaces.values()) if (this._isStock(s) && this._shownBig(s)) on = true;
-        return this.state('surface', on, now);
+        // the first report of the stock map's surface is where it stands (shown since before Navigation started),
+        // unless it is a new surface turning up shown: a stock map that makes its surface when it opens
+        return this.state('surface', on, now, first && !this._fresh);
     }
+    /** From now on new surfaces are new (mgu-render's snapshot is in): a surface first seen shown was just made. */
+    settled() { this._fresh = true; }
 
     /* ---------- learning: open the stock map once (left menu bar) while Navigation watches ---------- */
     learn(now) {
@@ -111,10 +122,11 @@ class StockNavFollower {
         for (const r of this.surfaces.values()) before.set(r.id, this._shownBig(r));
         this.learning = { until: now + this.o.learnMs, before, cands: new Map(), result: null };
     }
-    _learnSeen(r, now) {
+    _learnSeen(r, now, first) {
         const L = this.learning;
         if (now > L.until || r.yield) return;               // never the reversing camera or video
         const big = this._shownBig(r);
+        if (first && !this._fresh) { L.before.set(r.id, big); return; }   // mgu-render's snapshot: as it stood
         if (!big) { L.before.set(r.id, false); return; }   // hidden (again): its next showing would count
         if (L.before.get(r.id)) return;                     // shown since before learning: not what the driver opened
         L.before.set(r.id, true);

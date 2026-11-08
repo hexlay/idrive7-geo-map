@@ -196,14 +196,29 @@ fl.surface(line(tt, 4100, 0, 1920, 720), snAt(100));
 assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(100)), 'open', 'the camera gone: opens again');
 // by process name, and a SOME/IP state as a second source
 const fp = new SN.StockNavFollower({ proc: 'NaviMap' });
+fp.settled();
 assert.strictEqual(fp.surface(line(0, 4555, 1, 1920, 720, '-', 'NaviMap'), 10), 'open', 'matched by its process (a new surface id after a restart)');
 const fs2 = new SN.StockNavFollower({ surfaceId: 1 });
-assert.strictEqual(fs2.state('someip', true, 10), 'open', 'a SOME/IP state turning on: open');
-assert.strictEqual(fs2.state('someip', true, 20), null, 'staying on: nothing');
+assert.strictEqual(fs2.state('someip', true, 10), null, 'the first value of a SOME/IP field (on): where it stands, nothing opens');
+assert.strictEqual(fs2.state('someip', false, 20), null, 'off');
+assert.strictEqual(fs2.state('someip', true, 30), 'open', 'a SOME/IP state turning on: open');
+assert.strictEqual(fs2.state('someip', true, 40), null, 'staying on: nothing');
+// mgu-render tells every surface once when Navigation starts listening: the stock map shown since before does not
+// open Navigation (a restart while the driver uses the stock map); hidden and shown again afterwards does
+const fsnap = new SN.StockNavFollower({ surfaceId: 4100 });
+assert.strictEqual(fsnap.surface(line(0, 4100, 1, 1920, 720), 100), null, 'the snapshot: the stock map shown since before Navigation started: nothing');
+fsnap.settled();
+assert.strictEqual(fsnap.surface(line(0, 4100, 0, 1920, 720), 5000), null, 'hidden');
+assert.strictEqual(fsnap.surface(line(0, 4100, 1, 1920, 720), 6000), 'open', 'shown again: open');
+const fnew = new SN.StockNavFollower({ proc: 'NaviMap' });
+fnew.surface(line(0, 4100, 0, 1920, 720), 100);
+fnew.settled();
+assert.strictEqual(fnew.surface(line(0, 4777, 1, 1920, 720), 5000), 'open', 'after the snapshot, a new surface of the stock map turning up shown (made when it opens): open');
 // learning on the car: the surface that turns shown, full size, while Navigation is not in front
 const fl2 = new SN.StockNavFollower({});
 fl2.surface(line(0, 1000, 1, 1920, 720, '-', 'HmiMain3D'), 0);
 fl2.surface(line(0, 4100, 0, 1920, 720, '-', 'NaviMap'), 0);
+fl2.settled();
 fl2.learn(100);
 fl2.appVisible(false, 200);
 fl2.surface(line(0, 1000, 1, 1920, 720, '-', 'HmiMain3D'), 300);
@@ -214,6 +229,7 @@ const learned = fl2.learnDone();
 assert(learned && learned.surfaceId === 4100 && learned.proc === 'NaviMap', 'learned the stock map (not the HMI already shown, a widget or the camera): ' + JSON.stringify(learned));
 assert(fl2.configured() && !fl2.learning, 'learned: follows it now');
 const fl3 = new SN.StockNavFollower({});
+fl3.settled();
 fl3.learn(0); fl3.appVisible(false, 0);
 assert.strictEqual(fl3.learnDone().error, 'none', 'nothing opened: not learned');
 fl3.learn(0);
