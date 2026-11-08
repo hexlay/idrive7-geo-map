@@ -14,13 +14,15 @@
 #                                    (SOME/IP headers: which service talks to the cluster / HUD)
 #   SAMPLE=20 sh nav-recon.sh        measure CPU over 20 s instead of 10
 #
-# Cluster map / HUD arrows, as CarPlay does them: run it twice, the same way, and compare on the PC:
-#   1. LABEL=base SNIFF=60 sh nav-recon.sh       CarPlay off, cluster on its normal view
-#   2. LABEL=carplay SNIFF=60 sh nav-recon.sh    CarPlay on, Waze / Google Maps guiding a route,
-#                                                the map in the cluster, the HUD on
-#   node kit/tools/nav-recon-diff.js nav-recon-base-<time> nav-recon-carplay-<time>
-# What changes between them (a surface shown, a process busy, a SOME/IP service sending) is where
-# CarPlay's cluster map and turn arrows go.
+# The cluster map: run it twice, the same way, and compare on the PC:
+#   1. LABEL=base SNIFF=60 sh nav-recon.sh       the cluster on its normal view, the home screen in the centre
+#   2. LABEL=cluster SNIFF=60 sh nav-recon.sh    the cluster on its map view: the BMW map projected there (blank
+#                                                where it has no map, as in Georgia: still a picture sent to it)
+#   node kit/tools/nav-recon-diff.js nav-recon-base-<time> nav-recon-cluster-<time>
+# What changes between them (a surface shown, a process busy, a SOME/IP service sending) is how the head unit's
+# picture reaches the cluster: the place a map of osm_nav's would go. Firmware from 2021 on also projects CarPlay
+# to the cluster: LABEL=carplay (Waze / Google Maps guiding, its map in the cluster, the HUD on) shows its route
+# and the HUD's turn arrows. The HUD's arrows need a route guided: the BMW map cannot in Georgia.
 #
 # The stock BMW map, so Navigation can open in its place however it is opened (left menu bar NAV, the tile, voice):
 #   1. LABEL=base SNIFF=60 sh nav-recon.sh       the home screen, the BMW map closed
@@ -340,10 +342,11 @@ Next steps
     the hook point) and whether a gate is loaded now. audio.txt: who plays sound, for spoken prompts later.
   * cpu.txt: what each process costs now. Run once with the stock map on screen and once with Navigation
     (osm_nav) in front: the difference is what the stock map costs while it is covered.
-  * The cluster map and HUD arrows: two runs, LABEL=base and LABEL=carplay (CarPlay guiding, its map in the
-    cluster, the HUD on), each with SNIFF=60, then on the PC:
-      node kit/tools/nav-recon-diff.js <base report> <carplay report>
-    It lists the surfaces, processes and SOME/IP services that appear or get busy with CarPlay's guidance.
+  * The cluster map: two runs, LABEL=base and LABEL=cluster (the cluster on its map view, the BMW map projected
+    there), each with SNIFF=60, then on the PC:
+      node kit/tools/nav-recon-diff.js <base report> <cluster report>
+    It lists the surfaces, processes and SOME/IP services that appear or get busy with the cluster's map. On 2021+
+    firmware LABEL=carplay (CarPlay guiding, its map in the cluster, the HUD on) also shows the HUD's turn arrows.
     Only showing things is in scope (a surface on the cluster's screen, turn data for the HUD): nothing
     for KAFAS, cruise control or Speed Limit Assist.
 EOF

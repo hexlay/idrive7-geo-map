@@ -97,7 +97,7 @@ The head unit's installer refuses an app outright if its SOME/IP manifest names 
 | What the NAV button sends | The NAV button | A FrontCCU field from recon, or the gate's button log |
 | Build facts (C / C++ library, CommonAPI, hook point) | Building a gate with the NAV hook that loads safely | `nav-recon.sh`: `build-facts.txt` |
 | CPU and memory while driving, frame rate | The 150 MB / 60 fps targets | `cpu.txt`, the app's `memory:` log lines, the renderer's log |
-| Two recon runs, CarPlay off and CarPlay guiding in the cluster | Cluster map and HUD arrows | See Development |
+| Two recon runs, the cluster on its normal view and on its map view | How a map could reach the cluster | See Development |
 | Audio devices and services | Spoken prompts later | `nav-recon.sh`: `audio.txt` |
 
 ---
@@ -110,7 +110,7 @@ The head unit's installer refuses an app outright if its SOME/IP manifest names 
 * The map is not in this repo (it would not fit the MGU Store's limits: it downloads the whole repo, at most 64 MB, and builds on the head unit in at most 200 MB). It is a release of [hexlay/idrive7-geo-map-data](https://github.com/hexlay/idrive7-geo-map-data), named in `apps/osm_nav/app.json` (`maps`: URL, a mirror, sizes, SHA-256). The build downloads it once into `kit/tools/.osm-cache/` (internet needed for the first build; in the store, `build.network` in `mgu-repo.json`), checks it, and puts it into the package unpacked: in the store straight from the download, so the build folder stays at about 140 MB. A wrong or cut-short map fails the build and leaves no package.
 * A new map: `python3 kit/tools/pack_osm.py --fetch georgia -o georgia.pack`, gzip it, make a release in the data repo, and put its URL, sizes and SHA-256 sums into `app.json`.
 * On the head unit (read only): `deploy/car/nav-recon.sh` finds the GPS and button signals and writes `cpu.txt` (what each process costs), `build-facts.txt` and `audio.txt`.
-* Where CarPlay puts its cluster map and HUD arrows: run `LABEL=base SNIFF=60 sh nav-recon.sh` (CarPlay off) and `LABEL=carplay SNIFF=60 sh nav-recon.sh` (CarPlay guiding, its map in the cluster, the HUD on), then `node kit/tools/nav-recon-diff.js <base report> <carplay report>`. It lists the surfaces, processes and SOME/IP services that appear with CarPlay's guidance. Only display is in scope: nothing is sent to KAFAS, cruise control or Speed Limit Assist.
+* How the head unit's picture reaches the cluster (where a map of ours would go): `deploycarecon.ps1 base` (the cluster on its normal view) and `recon.ps1 cluster` (the cluster on its map view: the BMW map projected there, blank in Georgia is fine), then `node kit/tools/nav-recon-diff.js <base report> <cluster report>`. It lists the surfaces, processes and SOME/IP services that appear with the cluster's map. Firmware from 2021 on also projects CarPlay to the cluster: `recon.ps1 carplay` (Waze / Google Maps guiding, the HUD on) shows its route and the HUD's turn arrows; older firmware (e.g. 6.5.5) has no CarPlay in the cluster, and the HUD's arrows need a guided route, which the BMW map cannot give in Georgia. Only display is in scope: nothing is sent to KAFAS, cruise control or Speed Limit Assist.
 * Preview with a nearly empty demo tank: `OSM_NAV_DEMO_FUEL=6 node kit/tools/preview.js dist/osm_nav <outDir>`.
 * Line endings: `.gitattributes` keeps everything that runs on the head unit in Unix line endings, also in a Windows checkout.
 

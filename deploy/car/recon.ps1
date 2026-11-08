@@ -8,7 +8,9 @@
        connects, says what the unit is and how much room /var/tmp has; copies and runs nothing
    .\recon.ps1 base     -Key <...>     the home screen, the BMW map closed, CarPlay off
    .\recon.ps1 stocknav -Key <...>     the BMW map open, opened from the NAV icon in the left menu bar
-   .\recon.ps1 carplay  -Key <...>     CarPlay guiding a route, its map in the cluster, the HUD on
+   .\recon.ps1 cluster  -Key <...>     the cluster on its map view (the BMW map projected there: blank in Georgia is
+                                       fine), the central screen on the home screen as in base
+   .\recon.ps1 carplay  -Key <...>     2021+ firmware only: CarPlay guiding, its map in the cluster, the HUD on
    .\recon.ps1 clean    -Key <...>     removes /var/tmp/nav-recon from the unit (the reports are on the PC)
    options: -Sniff 30 (s of network capture, 0: none), -Sample 10 (s of CPU), -Out <folder> (default: ..\..\captures)
 
@@ -16,7 +18,7 @@
  to captures\ (kept out of git). Blocked script? powershell -ExecutionPolicy Bypass -File .\recon.ps1 check -Key ...
 #>
 param(
-    [Parameter(Position = 0)][ValidateSet('check', 'base', 'stocknav', 'carplay', 'clean')][string]$Cmd = 'check',
+    [Parameter(Position = 0)][ValidateSet('check', 'base', 'stocknav', 'cluster', 'carplay', 'clean')][string]$Cmd = 'check',
     [Parameter(Mandatory = $true)][string]$Key,
     [string]$Ip = '169.254.36.47',
     [int]$Port = 22,

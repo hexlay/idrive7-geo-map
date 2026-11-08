@@ -6,8 +6,10 @@
  *
  *   node kit/tools/nav-recon-diff.js <base report dir> <other report dir> [--all]
  *
- * Made for two questions, a base run against one other (SNIFF=60 each):
- *   LABEL=base / LABEL=carplay   where CarPlay's cluster map and HUD arrows go (CarPlay guiding, its map in the cluster)
+ * Made for these questions, a base run against one other (SNIFF=60 each):
+ *   LABEL=base / LABEL=cluster   how the head unit's picture reaches the cluster (the cluster on its map view: the BMW
+ *                                map projected there, blank where it has no map)
+ *   LABEL=base / LABEL=carplay   2021+ firmware: where CarPlay's cluster map and HUD arrows go (CarPlay guiding)
  *   LABEL=base / LABEL=stocknav  the stock BMW map's surface or SOME/IP state (the home screen against the BMW map
  *                                opened from the left menu bar): for osm_nav's app.json config.stockNav
  * Compares:
@@ -240,8 +242,10 @@ function report(dirA, dirB) {
     lines.push('', 'SOME/IP (someip.pcap):');
     diffSomeip(dirA, dirB).forEach((l) => lines.push(l));
     lines.push('', 'What to look for:',
-        '  carplay: a surface that turns visible on a screen of its own with CarPlay in the cluster (the cluster map\'s',
-        '    place), and a service sent to the cluster\'s or HUD\'s address only while CarPlay guides (the turn arrows).',
+        '  cluster: a surface that turns visible on a screen of its own (the cluster\'s), a process that gets busy,',
+        '    or a service sent to the cluster\'s address only with its map view on: how the cluster\'s map gets there.',
+        '  carplay (2021+ firmware): the same with CarPlay in the cluster, and a service sent to the HUD only while',
+        '    CarPlay guides (the turn arrows).',
         '  stocknav: a surface that turns visible at full size (w >= 800, h >= 400) with the BMW map open: its id and',
         '    process go to osm_nav app.json config.stockNav (surfaceId, proc). None: the HMI draws the map itself; a',
         '    SOME/IP flow that appears with it is config.stockNav iface / field.',
