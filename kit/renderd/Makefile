@@ -57,6 +57,20 @@ in-test-inputgate: build/mgu-inputgate.so
 	$(CXX) -std=c++14 -O2 -Wall -shared -fPIC $(IG_INC) -o build/test_inputgate_real.so test/test_inputgate_real.cpp
 	$(CXX) -std=c++14 -O2 -Wall $(IG_INC) -o build/test_inputgate test/test_inputgate.cpp build/test_inputgate_real.so -Wl,-rpath,'$$ORIGIN'
 	LD_PRELOAD=$(CURDIR)/build/mgu-inputgate.so build/test_inputgate
+# the read-only lister that goes to cars (deploy/car/ivi-list, run by nav-recon.sh): the build stops if its code ever
+# calls anything that changes the compositor (comments left out of the check)
+build/ivi-list: tools/ivi-list.c $(GEN_H) $(GEN_C)
+	@mkdir -p build
+	@if sed -e 's://.*$$::' -e '/^ *\*/d' -e '/^\/\*/d' tools/ivi-list.c | grep -nE 'layer_create|_set_|screen_set|screen_add|commit_changes|_destroy\([^,]*, *1\)|ivi_application|wl_compositor'; then \
+		echo "ivi-list must stay read only: the calls above are not allowed"; exit 1; fi
+	$(CC) -O2 -g0 -Wall -Wextra -Werror -Wno-unused-parameter -I$(GEN_DIR) $(UNIT_LD) -o $@ tools/ivi-list.c \
+		$(GEN_DIR)/ivi-controller-protocol.c -lwayland-client
+# ivi-list against a compositor that logs every request (test/mock_ivi.c): only surface_create, send_stats, destroy(0)
+in-test-ivi-list: build/ivi-list
+	@mkdir -p $(GEN_DIR)
+	wayland-scanner server-header protocol/ivi-controller.xml $(GEN_DIR)/ivi-controller-server-protocol.h
+	$(CC) -O2 -Wall -Wextra -Wno-unused-parameter -I$(GEN_DIR) -o build/mock_ivi test/mock_ivi.c $(GEN_DIR)/ivi-controller-protocol.c -lwayland-server
+	sh test/test_ivi_list.sh
 build/ivi-probe: tools/ivi-probe.c $(GEN_H) $(GEN_C)
 	$(CC) -O2 -g0 -Wall -Wno-unused-parameter -I$(GEN_DIR) $(UNIT_LD) -o $@ tools/ivi-probe.c \
 		$(GEN_DIR)/ivi-controller-protocol.c $(GEN_DIR)/ivi-application-protocol.c -lwayland-client -lwayland-egl -lEGL -lGLESv2 -lm

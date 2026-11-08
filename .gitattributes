@@ -13,4 +13,4 @@
 *.tgz binary
 *.mgu binary
 kit/renderd/prebuilt/mgu-renderd binary
-deploy/car/ivi-probe binary
+deploy/car/ivi-list binary

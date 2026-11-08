@@ -40,11 +40,11 @@
 #      osm_nav reads its position from such a field once it is named in its app.json
 #      "config.positioning" (apps/osm_nav/app.json says how).
 #      The controller's (FrontCCU) fields too: where the console buttons (NAV) come from.
-#   2. Wayland (Winston, wayland-0): ivi-probe list - screens, layer order, layers and surfaces
+#   2. Wayland (Winston, wayland-0): ivi-list (read only, next to this script) - screens, layer ids and surfaces
 #      with their visibility, size and owning process (HmiMain3D, the stock navigation's map
 #      renderer, the KOMBI video stream) - and which process is which.
 #   3. The HMI binary: its eGfxId* / surface strings for Nav, Map, EmbeddedSurface, WelcomeApp.
-#   4. The stock map: the /mnt/map mount, ROOT.NDS / PRODUCT metadata (names, sizes, versions).
+#   4. The stock map: the /mnt/map mount and its files (names and sizes only: none is opened).
 #   3b. Build facts for the controller gate: C / C++ library versions, CommonAPI, the hook point, the
 #      gate as loaded now (build-facts.txt). 3c. Audio devices, processes and services (audio.txt).
 #   5. Processes and services that look like navigation, CarPlay / projection, the cluster or the
@@ -69,13 +69,32 @@ BUTTONS=${BUTTONS:-0}
 SNIFF=${SNIFF:-0}
 SAMPLE=${SAMPLE:-10}
 
+# ---- safety first ---------------------------------------------------------------------------------
+# Lowest CPU and disk priority for this script and everything it starts: the HMI and the car's services always come
+# first. Room: at least 300 MB free where the report goes (the capture is capped far below that), else nothing runs.
+renice -n 19 $$ >/dev/null 2>&1
+command -v ionice >/dev/null 2>&1 && ionice -c 3 -p $$ >/dev/null 2>&1
+PARENT=$(dirname "$OUT")
+# the free space where the report would go: the nearest folder that exists (nothing is created before the check)
+P=$PARENT; while [ ! -d "$P" ] && [ "$P" != / ]; do P=$(dirname "$P"); done
+FREE_MB=$(df -m "$P" 2>/dev/null | awk 'NR == 2 {print $4}')
+case "$FREE_MB" in ''|*[!0-9]*) echo "nav-recon: cannot tell the free space at $PARENT: stopping" >&2; exit 1 ;; esac
+[ "$FREE_MB" -ge 300 ] || { echo "nav-recon: only $FREE_MB MB free at $PARENT (needs 300): stopping, nothing written" >&2; exit 1; }
+# free memory (kB): the catalog's parse is skipped unless the unit has plenty (it never competes with the HMI for it)
+MEM_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null)
+
 mkdir -p "$OUT" || { echo "nav-recon: cannot write $OUT" >&2; exit 1; }
 say() { echo "[nav-recon] $*"; echo "$*" >> "$OUT/summary.txt"; }
 run() {   # run <file> <command...>: its output (and errors) into the report, never fatal
     f=$1; shift
     { echo "\$ $*"; "$@"; echo "(exit $?)"; } > "$OUT/$f" 2>&1
 }
-NODE=$(command -v node 2>/dev/null || ls /usr/bin/node* 2>/dev/null | head -n 1)
+# node: the unit's own (MainApp's apps run on it), and only if it says it is node
+NODE=""
+for n in "$(command -v node 2>/dev/null)" /usr/bin/node; do
+    [ -n "$n" ] && [ -x "$n" ] && case "$("$n" --version 2>/dev/null)" in v[0-9]*) NODE=$n; break ;; esac
+done
+say "free: ${FREE_MB} MB at $PARENT, memory available: $(( ${MEM_KB:-0} / 1024 )) MB; running at the lowest priority"
 
 say "nav-recon $NOW${LABEL:+ ($LABEL)} on $(hostname 2>/dev/null) ($(uname -r 2>/dev/null))"
 echo "${LABEL:-unlabelled} $NOW" > "$OUT/label.txt"
@@ -84,10 +103,13 @@ run uname.txt uname -a
 for f in /etc/version /etc/sw_version /etc/build /etc/issue; do [ -r "$f" ] && cp "$f" "$OUT/$(basename "$f").txt"; done
 
 # ---- 1. SOME/IP catalog ----------------------------------------------------------------------
+CAT_MB=$( [ -r "$CATALOG" ] && du -m "$CATALOG" 2>/dev/null | cut -f1 )
 if [ -r "$CATALOG" ]; then
     cp "$CATALOG" "$OUT/someip-interfaces.json" 2>/dev/null
-    if [ -n "$NODE" ]; then
-        "$NODE" -e '
+    # the parse holds the catalog in memory (a few times its size): only with a small catalog, plenty of memory free
+    # (1 GB), and node's heap capped (256 MB: node stops itself before it could press the unit for memory)
+    if [ -n "$NODE" ] && [ "${CAT_MB:-999}" -le 40 ] && [ "${MEM_KB:-0}" -ge 1048576 ]; then
+        "$NODE" --max-old-space-size=256 -e '
             const fs = require("fs");
             const [cat, out, pat] = process.argv.slice(1);
             const re = new RegExp(pat);
@@ -123,7 +145,7 @@ if [ -r "$CATALOG" ]; then
         say "SOME/IP: $(tail -n 1 "$OUT/someip-scan.log") (someip-navigation.txt)"
     else
         grep -o '"de\.bmw[^"]*"' "$CATALOG" | sort -u | grep -E "$PATTERN" > "$OUT/someip-navigation.txt" 2>/dev/null
-        say "SOME/IP: no node on this unit: interface names only (someip-navigation.txt)"
+        say "SOME/IP: interface names only (someip-navigation.txt; node ${NODE:-missing}, catalog ${CAT_MB:-?} MB, memory $(( ${MEM_KB:-0} / 1024 )) MB): the full catalog copy is in the report, read on the PC"
     fi
 else
     say "SOME/IP: no catalog at $CATALOG"
@@ -139,15 +161,17 @@ fi
 ls -l /etc/oap/someip/ > "$OUT/oap-someip-dir.txt" 2>&1
 
 # ---- 2. Wayland surfaces -----------------------------------------------------------------------
-PROBE=$(command -v ivi-probe 2>/dev/null)
-for p in /var/opt/mgu-renderd/ivi-probe /var/opt/mgu-renderd/bin/ivi-probe "$(dirname "$0")/ivi-probe" ./ivi-probe; do
-    [ -z "$PROBE" ] && [ -x "$p" ] && PROBE=$p
-done
-if [ -n "$PROBE" ]; then
-    XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/wayland} WAYLAND_DISPLAY=wayland-0 run ivi-list.txt "$PROBE" list
-    say "Wayland: $(grep -c 'surface' "$OUT/ivi-list.txt" 2>/dev/null) surface lines (ivi-list.txt, via $PROBE)"
+# ivi-list only, from next to this script (kit/renderd/tools/ivi-list.c): read only by construction, it lists and
+# changes nothing. Never ivi-probe or anything else found on the unit: ivi-probe's own list asks the compositor to
+# "create" each existing layer (the HMI's too), which an unknown compositor might take as a change.
+LISTER="$(cd "$(dirname "$0")" && pwd)/ivi-list"
+if [ -x "$LISTER" ]; then
+    # exported in a subshell (an assignment in front of a shell function does not reach the programs it starts), and
+    # always the compositor's own folder, whatever an SSH session has in XDG_RUNTIME_DIR
+    ( XDG_RUNTIME_DIR=/run/wayland; WAYLAND_DISPLAY=wayland-0; export XDG_RUNTIME_DIR WAYLAND_DISPLAY; run ivi-list.txt "$LISTER" )
+    say "Wayland: $(grep -c '^  surface' "$OUT/ivi-list.txt" 2>/dev/null) surfaces (ivi-list.txt)"
 else
-    say "Wayland: no ivi-probe (build it: make -C kit/renderd build/ivi-probe, copy it next to this script)"
+    say "Wayland: no ivi-list next to this script (deploy/car/ivi-list): surfaces not listed"
 fi
 ls -l /run/wayland/ > "$OUT/wayland-sockets.txt" 2>&1
 # which process owns which wayland client: pids of the HMI and anything map / nav / kombi
@@ -214,32 +238,33 @@ fi
 
 # ---- 3b. build facts for the controller gate (mgu-inputgate.so, LD_PRELOAD into the HMI) --------------
 # A gate built for another C library, C++ library or CommonAPI would not load (or worse) - what it must match:
+# Everything here is read from files: nothing is run (no ldd, which has the loader process the HMI's binary), the
+# libraries are the ones the running HMI has loaded (/proc/<pid>/maps).
 {
-    echo "== C library";   { ldd --version 2>&1 || /lib/libc.so.6 2>&1; } | head -n 2
+    echo "== C library";   getconf GNU_LIBC_VERSION 2>/dev/null; ls -l /lib/libc.so.6 /lib/libc-*.so 2>/dev/null
     echo "== C++ library"; ls -l /usr/lib/libstdc++.so* /lib/libstdc++.so* 2>/dev/null
     for l in /usr/lib/libstdc++.so.6 /lib/libstdc++.so.6; do [ -r "$l" ] && grep -aoE 'GLIBCXX_[0-9.]+' "$l" | sort -t. -k3 -n -u | tail -n 3; done
     echo "== vsomeip / CommonAPI"; ls -l /usr/lib/libvsomeip* /usr/lib/libCommonAPI* 2>/dev/null
-    if [ -n "$HMI" ]; then
-        echo "== HmiMain3D libraries"; ldd "$HMI" 2>&1 | grep -Ei 'CommonAPI|vsomeip|stdc|libc\.|boost' | head -n 40
-        SYM=_ZN9CommonAPI6SomeIP10Connection18handleProxyReceiveERKSt10shared_ptrIN7vsomeip7messageEE
-        for l in $(ldd "$HMI" 2>/dev/null | awk '/CommonAPI-SomeIP/ {print $3}'); do
-            echo "== $l has the gate's hook point: $(grep -ac "$SYM" "$l" 2>/dev/null)"
-        done
-    fi
-    echo "== the gate now"
+    SYM=_ZN9CommonAPI6SomeIP10Connection18handleProxyReceiveERKSt10shared_ptrIN7vsomeip7messageEE
     for d in /proc/[0-9]*; do
-        case "$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" in *HmiMain3D*)
-            echo "HmiMain3D pid ${d#/proc/}: $(tr '\0' '\n' < "$d/environ" 2>/dev/null | grep '^LD_PRELOAD=')"
-            grep -o '/[^ ]*mgu-inputgate[^ ]*' "$d/maps" 2>/dev/null | sort -u ;;
+        # the HMI process itself (its name), not a shell whose command line mentions it
+        case "$(cat "$d/comm" 2>/dev/null)" in HmiMain3D)
+            echo "== HmiMain3D pid ${d#/proc/}: libraries it has loaded"
+            awk '$6 ~ /\.so/ {print $6}' "$d/maps" 2>/dev/null | sort -u | grep -Ei 'CommonAPI|vsomeip|stdc|libc[.-]|boost|inputgate' | head -n 40
+            for l in $(awk '$6 ~ /CommonAPI-SomeIP/ {print $6}' "$d/maps" 2>/dev/null | sort -u); do
+                echo "== $l has the gate's hook point: $(grep -ac "$SYM" "$l" 2>/dev/null)"
+            done
+            echo "== its LD_PRELOAD: $(tr '\0' '\n' < "$d/environ" 2>/dev/null | grep '^LD_PRELOAD=')" ;;
         esac
     done
-    ls -l /var/opt/mgu-inputgate/ 2>/dev/null
+    echo "== the gate's opt-in folder"; ls -l /var/opt/mgu-inputgate/ 2>/dev/null
 } > "$OUT/build-facts.txt" 2>&1
 say "build facts: C / C++ library, CommonAPI and the gate as loaded now (build-facts.txt)"
 
 # ---- 3c. audio, for spoken turn prompts later: who plays sound and how the HMI mixes it ---------------
 {
-    echo "== sound devices"; ls -l /dev/snd 2>/dev/null; cat /proc/asound/cards 2>/dev/null; command -v aplay >/dev/null && aplay -l 2>&1 | head -n 40
+    # from /proc and /dev listings only: no sound device is opened (no aplay)
+    echo "== sound devices"; ls -l /dev/snd 2>/dev/null; cat /proc/asound/cards 2>/dev/null; cat /proc/asound/pcm 2>/dev/null
     echo "== processes"
     for d in /proc/[0-9]*; do
         cmd=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c 1-200)
@@ -260,17 +285,9 @@ for m in /mnt/map /mnt/navdata /mnt/data/map; do
             echo "-- $f  $(ls -la "$f" 2>/dev/null | awk '{print $5}') bytes"
         done
     } >> "$OUT/map-files.txt" 2>&1
+    # the stock map's files are only listed (names, sizes): none is opened, so nothing the navigation reads is locked
     root=$(find "$m" -maxdepth 3 -iname 'ROOT.NDS' 2>/dev/null | head -n 1)
-    if [ -n "$root" ]; then
-        # ROOT.NDS is SQLite: its tables, and the readable text of its metadata (versions, regions)
-        if command -v sqlite3 >/dev/null 2>&1; then
-            sqlite3 -readonly "$root" '.tables' > "$OUT/root-nds-tables.txt" 2>&1
-            sqlite3 -readonly "$root" "SELECT name, sql FROM sqlite_master" > "$OUT/root-nds-schema.txt" 2>&1
-        fi
-        head -c 100 "$root" | od -c | head -n 3 > "$OUT/root-nds-head.txt" 2>&1
-        grep -aoE '[A-Za-z0-9_ .:/-]{6,80}' "$root" 2>/dev/null | grep -Ei 'version|region|product|supplier|here|nds|date|country|geo' | sort -u | head -n 300 > "$OUT/root-nds-strings.txt"
-        say "stock map: $root ($(ls -la "$root" | awk '{print $5}') bytes)"
-    fi
+    [ -n "$root" ] && say "stock map: $root ($(ls -la "$root" | awk '{print $5}') bytes)"
 done
 [ -s "$OUT/map-files.txt" ] || say "stock map: no /mnt/map"
 
@@ -301,10 +318,14 @@ if [ "$SNIFF" -gt 0 ] 2>/dev/null; then
     [ -z "$TCPDUMP" ] && for p in /usr/sbin/tcpdump /sbin/tcpdump "$(dirname "$0")/tcpdump" ./tcpdump; do [ -x "$p" ] && TCPDUMP=$p && break; done
     if [ -n "$TCPDUMP" ]; then
         say "network: recording ${SNIFF} s (someip.pcap) - keep the car as it is meanwhile"
-        "$TCPDUMP" -i any -n -s 256 -U -w "$OUT/someip.pcap" 'not port 22' > "$OUT/tcpdump.log" 2>&1 &
+        # listen only: -p (no promiscuous mode: the interfaces are left as they are), 256 bytes a packet, at most
+        # 150000 packets (~40 MB), SSH left out; stopped after SNIFF s, and also if this script ends early (SSH lost)
+        "$TCPDUMP" -p -i any -n -s 256 -c 150000 -U -w "$OUT/someip.pcap" 'not port 22' > "$OUT/tcpdump.log" 2>&1 &
         TD=$!
+        trap 'kill "$TD" 2>/dev/null' EXIT HUP INT TERM
         sleep "$SNIFF"
         kill "$TD" 2>/dev/null; wait "$TD" 2>/dev/null
+        trap - EXIT HUP INT TERM
         say "network: $(ls -la "$OUT/someip.pcap" 2>/dev/null | awk '{print $5}') bytes captured (someip.pcap: kit/tools/nav-recon-diff.js reads it)"
     else
         say "network: no tcpdump on this unit (a static ARM tcpdump next to this script works too)"

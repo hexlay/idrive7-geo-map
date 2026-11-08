@@ -83,7 +83,7 @@ Things to know
 
 Recon for osm_nav (read only, from Windows)
 -------------------------------------------
-recon.ps1 copies nav-recon.sh and ivi-probe to /var/tmp/nav-recon on the unit,
+recon.ps1 copies nav-recon.sh and ivi-list to /var/tmp/nav-recon on the unit,
 runs one labelled recon, brings the report back to captures\ (kept out of git:
 it holds the car's signal catalog and network traffic) and checks it arrived
 whole. Nothing outside /var/tmp/nav-recon is written; nothing is stopped.
@@ -92,5 +92,13 @@ whole. Nothing outside /var/tmp/nav-recon is written; nothing is stopped.
     .\recon.ps1 stocknav -Key <...>   BMW map opened from the left menu bar NAV
     .\recon.ps1 carplay  -Key <...>   CarPlay guiding, its map in the cluster
     .\recon.ps1 clean    -Key <...>   remove /var/tmp/nav-recon from the unit
-ivi-probe is built from kit/renderd/tools/ivi-probe.c (make -C kit/renderd
-build/ivi-probe, in the Ubuntu 18.04 image); recon only runs its "list".
+ivi-list is built from kit/renderd/tools/ivi-list.c (make -C kit/renderd
+build/ivi-list, in the Ubuntu 18.04 image). It is read only by construction:
+per surface it asks for a handle, its owner, and drops the handle keeping the
+surface - nothing else (make in-test-ivi-list checks every request it sends;
+the build refuses any call that changes the compositor). recon.ps1 sends only
+that exact binary (its SHA-256 is pinned). Never copy ivi-probe to a car: its
+list asks the compositor to "create" existing layers.
+nav-recon.sh runs at the lowest CPU and disk priority, needs 300 MB free, caps
+the network capture at 150000 packets (~40 MB), opens no sound device, runs
+no other program on the HMI binary, and only lists the stock map's files.

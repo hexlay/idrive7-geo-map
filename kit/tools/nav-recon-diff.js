@@ -27,7 +27,7 @@ const ALL = process.argv.indexOf('--all') >= 0;
 const read = (dir, f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch (e) { return null; } };
 const hex4 = (n) => '0x' + ('000' + n.toString(16)).slice(-4);
 
-/* ---------- surfaces (ivi-probe list) ---------- */
+/* ---------- surfaces (ivi-list, deploy/car) ---------- */
 function parseIvi(text) {
     const objs = {};
     if (!text) return null;
@@ -42,7 +42,7 @@ function parseIvi(text) {
 }
 function diffIvi(a, b) {
     const out = [];
-    if (!a || !b) { out.push('  (ivi-list.txt missing in ' + (!a ? 'the base' : 'the other') + ' report: copy ivi-probe next to nav-recon.sh)'); return out; }
+    if (!a || !b) { out.push('  (ivi-list.txt missing in ' + (!a ? 'the base' : 'the other') + ' report: copy ivi-list next to nav-recon.sh)'); return out; }
     const keys = Object.keys(Object.assign({}, a, b)).sort((x, y) => Number(x.split(' ')[1]) - Number(y.split(' ')[1]));
     keys.forEach((k) => {
         const A = a[k], B = b[k];
