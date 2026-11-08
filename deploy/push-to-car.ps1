@@ -46,7 +46,11 @@ $psi.Arguments = (($opts | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"'
     " ""mkdir -p $dest && rm -rf $dest/apps && tar xzf - -C /var/opt && cd $dest && md5sum -c KIT_SUMS >/dev/null && echo 'kit copied + verified'"""
 $psi.UseShellExecute = $false
 $psi.RedirectStandardInput = $true
-$p = [System.Diagnostics.Process]::Start($psi)
+# .NET opens ssh's stdin with the console's input encoding: UTF-8 with a BOM on many PCs, which puts 3 bytes
+# (ef bb bf) in front of the kit and breaks it ("not in gzip format"). Without a BOM while ssh starts.
+$enc = [Console]::InputEncoding
+try { [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false; $p = [System.Diagnostics.Process]::Start($psi) }
+finally { [Console]::InputEncoding = $enc }
 $in = [System.IO.File]::OpenRead($Kit)
 try { $in.CopyTo($p.StandardInput.BaseStream) } finally { $in.Close(); $p.StandardInput.Close() }
 $p.WaitForExit()

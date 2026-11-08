@@ -80,3 +80,17 @@ Things to know
 * BMW's own apps are never modified: the installer only updates or removes apps it
   installed itself (built with the kit or listed in custom_apps.json), and gives new
   apps uids from the top of MainApp's range (12450 down) so the two never collide.
+
+Recon for osm_nav (read only, from Windows)
+-------------------------------------------
+recon.ps1 copies nav-recon.sh and ivi-probe to /var/tmp/nav-recon on the unit,
+runs one labelled recon, brings the report back to captures\ (kept out of git:
+it holds the car's signal catalog and network traffic) and checks it arrived
+whole. Nothing outside /var/tmp/nav-recon is written; nothing is stopped.
+    .\recon.ps1 check    -Key <...\enrollments\<VIN>\id_rsa>   connect only
+    .\recon.ps1 base     -Key <...>   home screen, BMW map closed, CarPlay off
+    .\recon.ps1 stocknav -Key <...>   BMW map opened from the left menu bar NAV
+    .\recon.ps1 carplay  -Key <...>   CarPlay guiding, its map in the cluster
+    .\recon.ps1 clean    -Key <...>   remove /var/tmp/nav-recon from the unit
+ivi-probe is built from kit/renderd/tools/ivi-probe.c (make -C kit/renderd
+build/ivi-probe, in the Ubuntu 18.04 image); recon only runs its "list".
