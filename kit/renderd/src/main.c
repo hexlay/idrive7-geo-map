@@ -60,6 +60,7 @@
 #include "gate.h"
 #include "gfx.h"
 #include "log.h"
+#include "navwatch.h"
 #include "proto.h"
 #include "share.h"
 #include "touch.h"
@@ -303,9 +304,70 @@ static void hmi_probe(struct ivi_controller *c, uint32_t id) {
     ivi_controller_surface_send_stats(probes[k].s);
 }
 
+/* navwatch (nav_watch): the other processes' surfaces, shown / hidden / resized, told to @mgu-nav-buttons (osm_nav)
+ * one line each. Read only: these handles only listen (no set_*); the surfaces are the compositor's. */
+static navwatch_surf nw[NAVWATCH_MAX];
+static struct ivi_controller_surface *nw_s[NAVWATCH_MAX];
+static int nw_full_said;
+static void nw_tell(int i) {
+    if (!navwatch_due(&nw[i])) return;
+    char line[160];
+    int n = navwatch_line(line, sizeof line, (long)(now_us() / 1000), &nw[i]);
+    if (n > 0) navwatch_send("mgu-nav-buttons", line, (size_t)n);      /* nobody listening: refused at once */
+}
+static void nw_visibility(void *d, struct ivi_controller_surface *s, int32_t v) {
+    (void)s;
+    int i = (int)(intptr_t)d;
+    nw[i].vis = v != 0; nw[i].have_vis = 1;
+    nw_tell(i);
+}
+static void nw_dst(void *d, struct ivi_controller_surface *s, int32_t x, int32_t y, int32_t w, int32_t h) {
+    (void)s;
+    int i = (int)(intptr_t)d;
+    nw[i].dst[0] = x; nw[i].dst[1] = y; nw[i].dst[2] = w; nw[i].dst[3] = h;
+    nw_tell(i);
+}
+static void nw_stats(void *d, struct ivi_controller_surface *s, uint32_t a, uint32_t b, uint32_t c, uint32_t pid, const char *n) {
+    (void)s, (void)a, (void)b, (void)c, (void)pid;
+    int i = (int)(intptr_t)d;
+    const char *base = n ? strrchr(n, '/') : NULL;
+    base = base ? base + 1 : n ? n : "";
+    snprintf(nw[i].proc, sizeof nw[i].proc, "%s", base[0] ? base : "?");
+    nw_tell(i);
+}
+static void nw_destroyed(void *d, struct ivi_controller_surface *s) {
+    int i = (int)(intptr_t)d;
+    wl_proxy_destroy((struct wl_proxy *)s);
+    nw_s[i] = NULL;
+    if (nw[i].have_vis && nw[i].vis) { nw[i].vis = 0; nw_tell(i); }      /* gone: hidden */
+    memset(&nw[i], 0, sizeof nw[i]);
+}
+static const struct ivi_controller_surface_listener nw_listener = {
+    nw_visibility, y_opacity, y_rect, nw_dst, y_config, y_int, y_int, y_layer, nw_stats, nw_destroyed, y_int,
+};
+static void nw_add(struct ivi_controller *c, uint32_t id) {
+    if (!cfg.nav_watch || (id >= SURF_BASE && id < SURF_BASE + MAX_CLIENTS)) return;   /* not our own surfaces */
+    int k = -1;
+    for (int i = 0; i < NAVWATCH_MAX; i++) {
+        if (nw[i].used && nw[i].id == id) return;
+        if (!nw[i].used && k < 0) k = i;
+    }
+    if (k < 0) {
+        if (!nw_full_said) { nw_full_said = 1; log_info("nav_watch: more than %d surfaces, surface %u and later not watched", NAVWATCH_MAX, id); }
+        return;
+    }
+    memset(&nw[k], 0, sizeof nw[k]);
+    nw[k].used = 1; nw[k].id = id;
+    for (int i = 0; i < cfg.n_yield; i++) if (cfg.yield_surfaces[i] == id) nw[k].yield = 1;
+    nw_s[k] = ivi_controller_surface_create(c, id);
+    ivi_controller_surface_add_listener(nw_s[k], &nw_listener, (void *)(intptr_t)k);
+    ivi_controller_surface_send_stats(nw_s[k]);
+}
+
 static void c_surface(void *d, struct ivi_controller *c, uint32_t id) {
     (void)d;
     hmi_probe(c, id);
+    nw_add(c, id);
     for (int i = 0; i < cfg.n_yield; i++) {
         if (cfg.yield_surfaces[i] != id) continue;
         int k = 0;

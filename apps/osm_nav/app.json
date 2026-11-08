@@ -193,6 +193,26 @@
       ]
     },
     {
+      "key": "openOnNav",
+      "label": "Open Navigation",
+      "type": "choice",
+      "default": "both",
+      "options": [
+        [
+          "both",
+          "NAV button and the BMW map (side menu, tile, voice)"
+        ],
+        [
+          "button",
+          "NAV button only"
+        ],
+        [
+          "off",
+          "Off (stock NAV)"
+        ]
+      ]
+    },
+    {
       "key": "theme",
       "label": "Colour theme",
       "type": "choice",
@@ -298,6 +318,17 @@
       "iface": null,
       "instance": "1",
       "field": null
+    },
+    "stockNavComment": "stockNav: the stock BMW map, so Navigation opens in its place however it is opened (the left menu bar NAV icon, the Navigation tile, voice). Nothing is blocked or hidden: Navigation opens over it, and BACK from Navigation leaves you on the stock map without opening Navigation again. Sources: mgu-render surface lines (nav_watch = 1 in mgu-render.conf; surfaceId and / or proc of the stock map surface, at least minWidth x minHeight; the Route page learns it: tap Learn BMW map and open the BMW map from the side menu), or a SOME/IP field (iface, instance, field; match: navkey pattern of the value while the stock map is in front) found with deploy/car/nav-recon.sh (LABEL=base / LABEL=stocknav). Empty: learn on the car.",
+    "stockNav": {
+      "surfaceId": null,
+      "proc": "",
+      "minWidth": 800,
+      "minHeight": 400,
+      "iface": null,
+      "instance": "1",
+      "field": null,
+      "match": ""
     }
   }
 }

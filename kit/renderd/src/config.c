@@ -39,6 +39,7 @@ void cfg_defaults(struct cfg *c)
     snprintf(c->touch_table, sizeof c->touch_table, "idrive7_render");
     snprintf(c->controller_gate, sizeof c->controller_gate, "/run/mgu-renderd/inputgate");
     snprintf(c->controller_lib, sizeof c->controller_lib, "mgu-inputgate");
+    c->nav_watch = 1;
 }
 
 static int str(char *dst, size_t n, const char *v, const char *key)
@@ -153,6 +154,7 @@ int cfg_set(struct cfg *c, const char *key, const char *value)
     else if (!strcmp(key, "touch")) c->touch = n != 0;
     else if (!strcmp(key, "touch_port")) c->touch_port = (int)n;
     else if (!strcmp(key, "verbose")) c->verbose = n != 0;
+    else if (!strcmp(key, "nav_watch")) c->nav_watch = n != 0;
     else {
         log_error("unknown setting '%s'", key);
         return -1;

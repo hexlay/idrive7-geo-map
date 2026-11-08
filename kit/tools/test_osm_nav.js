@@ -140,6 +140,89 @@ assert(close(pos._autoScale(416934000, 448015000, 'e7'), 41.6934, 44.8015), '1e-
 assert(close(pos._autoScale(Math.round(41.6934 * 2147483648 / 180), Math.round(44.8015 * 2147483648 / 180), 'semi'), 41.6934, 44.8015), 'semicircles (not taken for 1e-7 degrees)');
 assert.strictEqual(pos._autoScale(48.85, 2.35, 'paris'), null, 'a fix on no installed map: not used');
 // the demo drive: never by itself on the car (MainApp: ctx.app), only off the car or when chosenconst demoCtx = (app, mode) => ({ app, previewDemo: true, log: ctx.log, dataDir: os.tmpdir(), spec: { config: {} }, settings: { get: () => mode }, ui: { isVisible: () => true } });const mk = (app, mode) => new Position(demoCtx(app, mode), { pack, router, packs: () => [pack], route: () => null });assert.strictEqual(mk({ on() {} }, 'auto').wantDemo(), false, 'on the car, auto: no demo drive (no position instead)');assert.strictEqual(mk(null, 'auto').wantDemo(), true, 'PC preview, auto: the demo drive');assert.strictEqual(mk({ on() {} }, 'on').wantDemo(), true, 'on the car, chosen in Settings: the demo drive');
+
+// ---- the stock BMW map: Navigation opens in its place, never a loop after BACK, never over the camera ----
+const SN = require(path.join(APP, 'stocknav'));
+const line = (t, id, vis, w, h, flag, proc) => SN.parseSurface(t + ' surface ' + id + ' ' + vis + ' 0 0 ' + w + ' ' + h + ' ' + (flag || '-') + ' ' + (proc || 'NaviMap'));
+assert.deepStrictEqual(SN.parseSurface('104251 surface 4100 1 0 0 1920 720 - NaviMap'), { t: 104251, id: 4100, vis: 1, x: 0, y: 0, w: 1920, h: 720, yield: false, proc: 'NaviMap' }, 'a surface line');
+assert.strictEqual(SN.parseSurface('104251 2 a401'), null, 'a button line is not a surface line');
+let fl = new SN.StockNavFollower({});
+assert.strictEqual(fl.surface(line(0, 4100, 1, 1920, 720), 0), null, 'not learned or configured: never opens');
+fl = new SN.StockNavFollower({ surfaceId: 4100 });
+let tt = 1000;
+const snAt = (dt) => { tt += dt; return tt; };
+assert.strictEqual(fl.surface(line(tt, 4100, 0, 1920, 720), tt), null, 'hidden at first');
+assert.strictEqual(fl.surface(line(tt, 4200, 1, 560, 210, '-', 'HmiMain3D'), snAt(10)), null, 'another surface (a home widget): nothing');
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 560, 210), snAt(10)), null, 'the stock map at widget size (560x210): not the stock map screen');
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(10)), 'open', 'shown full size, Navigation not in front: open (rising edge)');
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1910, 720), snAt(10)), null, 'shown again: no new edge');
+// Navigation in front; the HMI may hide the stock map under it, or not
+fl.appVisible(true, snAt(300));
+assert.strictEqual(fl.surface(line(tt, 4100, 0, 1920, 720), snAt(50)), null, 'hidden under Navigation: nothing');
+// BACK: Navigation leaves, the stock map shows again underneath: no loop
+fl.appVisible(false, snAt(5000));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(40)), null, 'BACK onto the stock map: Navigation does not open again');
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(40)), null, 'and not on a repeated report');
+fl.tick(snAt(10000));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(10)), null, 'the stock map used for a while: still not');
+assert.strictEqual(fl.surface(line(tt, 4100, 0, 1920, 720), snAt(2000)), null, 'the driver leaves the stock map too');
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(3000)), 'open', 'the next time it opens (side menu NAV): Navigation opens');
+// BACK when the HMI leaves the stock map shown under Navigation: no edge at all, so nothing
+fl.appVisible(true, snAt(200));
+fl.appVisible(false, snAt(8000));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(30)), null, 'BACK with the stock map shown all along: nothing');
+// HOME / MENU from Navigation: the stock map was hidden all along; armed again after settleMs
+fl.surface(line(tt, 4100, 0, 1920, 720), snAt(500));
+fl.appVisible(true, snAt(100));
+fl.appVisible(false, snAt(6000));
+fl.tick(snAt(1000));
+assert.strictEqual(fl.armed, false, 'left by HOME one second ago: not armed yet (BACK may still bring the stock map back)');
+fl.tick(snAt(3100));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(100)), 'open', 'left by HOME, the stock map opened 4 s later (side menu NAV): open');
+fl.appVisible(true, snAt(100));
+fl.surface(line(tt, 4100, 0, 1920, 720), snAt(100));
+fl.appVisible(false, snAt(6000));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(500)), null, 'within settleMs of leaving, with no hiding seen after: not yet');
+fl.surface(line(tt, 4100, 0, 1920, 720), snAt(500));
+fl.appVisible(true, snAt(100));
+fl.appVisible(false, snAt(6000));
+fl.tick(snAt(4100));
+assert.strictEqual(fl.armed, true, 'the stock map hidden for settleMs after Navigation left: armed again');
+// never over the reversing camera or video (a yield surface shown)
+fl.surface(line(tt, 0x197, 1, 1920, 720, 'y', 'camera'), snAt(100));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(100)), null, 'the camera shown: never opens');
+fl.surface(line(tt, 0x197, 0, 1920, 720, 'y', 'camera'), snAt(100));
+fl.surface(line(tt, 4100, 0, 1920, 720), snAt(100));
+assert.strictEqual(fl.surface(line(tt, 4100, 1, 1920, 720), snAt(100)), 'open', 'the camera gone: opens again');
+// by process name, and a SOME/IP state as a second source
+const fp = new SN.StockNavFollower({ proc: 'NaviMap' });
+assert.strictEqual(fp.surface(line(0, 4555, 1, 1920, 720, '-', 'NaviMap'), 10), 'open', 'matched by its process (a new surface id after a restart)');
+const fs2 = new SN.StockNavFollower({ surfaceId: 1 });
+assert.strictEqual(fs2.state('someip', true, 10), 'open', 'a SOME/IP state turning on: open');
+assert.strictEqual(fs2.state('someip', true, 20), null, 'staying on: nothing');
+// learning on the car: the surface that turns shown, full size, while Navigation is not in front
+const fl2 = new SN.StockNavFollower({});
+fl2.surface(line(0, 1000, 1, 1920, 720, '-', 'HmiMain3D'), 0);
+fl2.surface(line(0, 4100, 0, 1920, 720, '-', 'NaviMap'), 0);
+fl2.learn(100);
+fl2.appVisible(false, 200);
+fl2.surface(line(0, 1000, 1, 1920, 720, '-', 'HmiMain3D'), 300);
+fl2.surface(line(0, 4200, 1, 560, 210, '-', 'HmiMain3D'), 300);
+fl2.surface(line(0, 0x197, 1, 1920, 720, 'y', 'camera'), 300);
+fl2.surface(line(0, 4100, 1, 1920, 720, '-', 'NaviMap'), 400);
+const learned = fl2.learnDone();
+assert(learned && learned.surfaceId === 4100 && learned.proc === 'NaviMap', 'learned the stock map (not the HMI already shown, a widget or the camera): ' + JSON.stringify(learned));
+assert(fl2.configured() && !fl2.learning, 'learned: follows it now');
+const fl3 = new SN.StockNavFollower({});
+fl3.learn(0); fl3.appVisible(false, 0);
+assert.strictEqual(fl3.learnDone().error, 'none', 'nothing opened: not learned');
+fl3.learn(0);
+fl3.surface(line(0, 5001, 1, 1920, 720, '-', 'A'), 10);
+fl3.surface(line(0, 5002, 1, 1920, 720, '-', 'B'), 10);
+assert.strictEqual(fl3.learnDone().error, 'vague', 'two full-size screens of different processes at once: refused');
+fl3.learn(0);
+fl3.tick(25000);
+assert(fl3.learning.result && fl3.learning.result.error === 'none', 'learning times out after 20 s');
 pack.close && pack.close();
 console.log('osm_nav: all checks passed (Tbilisi - Batumi ' + Math.round(far.length / 1000) + ' km in ' + far.searchMs + ' ms; '
     + along.length + ' of ' + stations.length + ' fuel stations along it in ' + alongMs + ' ms, stop at ' + Math.round(stop.s / 1000) + ' km)');

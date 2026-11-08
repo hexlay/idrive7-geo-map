@@ -39,6 +39,7 @@ struct cfg {
     char controller_gate[128];  /* the HMI controller gate's file (upstream inputgate) */
     char controller_lib[64];    /* its library name, looked for in the HMI's maps */
     char record_dir[128];       /* debug: each connection's incoming bytes to <dir>/<app>-<pid>-<n>.bin */
+    int nav_watch;              /* tell @mgu-nav-buttons when other processes' surfaces show / hide (read only) */
     int verbose;
 };
 

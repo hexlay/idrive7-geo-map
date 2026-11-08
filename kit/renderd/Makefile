@@ -49,6 +49,10 @@ IG_INC = -Iinputgate/vsomeip-include/interface/compat
 test-inputgate:
 	$(DOCKER) build -q -t mgu-renderd-build docker >/dev/null
 	$(DOCKER) run --rm -v "$(CURDIR):/w" -w /w mgu-renderd-build make -s in-test-inputgate
+in-test-navwatch:
+	@mkdir -p build
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Isrc -o build/test_navwatch test/test_navwatch.c src/navwatch.c
+	build/test_navwatch
 in-test-inputgate: build/mgu-inputgate.so
 	$(CXX) -std=c++14 -O2 -Wall -shared -fPIC $(IG_INC) -o build/test_inputgate_real.so test/test_inputgate_real.cpp
 	$(CXX) -std=c++14 -O2 -Wall $(IG_INC) -o build/test_inputgate test/test_inputgate.cpp build/test_inputgate_real.so -Wl,-rpath,'$$ORIGIN'

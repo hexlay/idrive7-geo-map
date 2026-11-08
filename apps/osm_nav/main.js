@@ -31,6 +31,7 @@ const { MapView, poiIcon } = require('./map_view');
 const { Position, TOUR } = require('./gps');
 const { Search, CATEGORIES, kindName, KIND } = require('./search');
 const navkey = require('./navkey');
+const { StockNavFollower, parseSurface } = require('./stocknav');
 const FU = require('./fuel');
 const H = require('./hud');
 
@@ -806,12 +807,13 @@ mgu.run({
                 if (P.work) { navigateTo(P.work); kick(); } else { page = 1; toast(L ? 'აირჩიეთ ადგილი და დააჭირეთ "სამსახური"' : 'Pick a place and tap Work to set it'); kick(); }
             }, 'rt_work', P.work ? { primary: true } : null);
 
-            // Favourites & Recent list on right panel
-            const quickList = (P.favs || []).map((f) => Object.assign({ icon: 'fav' }, f)).concat((P.recent || []).map((r) => Object.assign({ icon: 'recent' }, r))).slice(0, 4);
+            // Favourites & Recent list on right panel (as many rows as fit above the NAV / BMW map controls)
             let ry = qby + qbh + sz(14);
-            const rRowH = sz(46);
+            const rRowH = sz(46), ctlTop = top + h - sz(196);
+            const quickList = (P.favs || []).map((f) => Object.assign({ icon: 'fav' }, f)).concat((P.recent || []).map((r) => Object.assign({ icon: 'recent' }, r)))
+                .slice(0, Math.max(0, Math.min(4, Math.floor((ctlTop - ry - sz(6)) / rRowH))));
             if (!quickList.length) {
-                cv.text(L ? 'შენახული ადგილები გამოჩნდება აქ' : 'Saved & recent places appear here', rx + sz(16), ry + sz(26), sz(13), '#6b7480', { literal: true });
+                if (ry + sz(30) < ctlTop) cv.text(L ? 'შენახული ადგილები გამოჩნდება აქ' : 'Saved & recent places appear here', rx + sz(16), ry + sz(26), sz(13), '#6b7480', { literal: true });
                 ry += rRowH * 2;
             } else {
                 quickList.forEach((item, idx) => {
@@ -822,6 +824,33 @@ mgu.run({
                     cv.target(rx, ry, rw, rRowH, () => { navigateTo(item); kick(); }, 'qitem_' + idx, sz(8));
                     ry += rRowH;
                 });
+            }
+
+            // the stock BMW map: Navigation opens in its place (left menu bar's NAV, the tile, voice): learn / forget
+            const mapBoxY = ctlTop;
+            cv.fillRect(rx + sz(14), mapBoxY, rw - sz(28), 1, withAlpha('#ffffff', 0.1));
+            const sLearning = !!follower.learning;
+            const mode = openMode();
+            const mapStatus = sLearning
+                ? (L ? 'გახსენით BMW-ის რუკა გვერდითი მენიუდან (NAV)...' : 'Now open the BMW map from the side menu (NAV)...')
+                : mode !== 'both' ? (L ? 'BMW-ის რუკის მიყოლა გამორთულია (პარამეტრები)' : 'Following the BMW map is off (Settings)')
+                    : S.stockNav ? (L ? 'BMW-ის რუკის ნაცვლად იხსნება ეს ნავიგაცია' : 'Opens in place of the BMW map (surface ' + S.stockNav.surfaceId + ')')
+                        : surfSeen ? (L ? 'BMW-ის რუკა: დააჭირეთ "სწავლა"' : 'BMW map (side menu, tile, voice): tap Learn')
+                            : (L ? 'ეკრანების სიგნალი ჯერ არ მოსულა (mgu-render nav_watch)' : 'No screen feed yet (mgu-render nav_watch)');
+            cv.text(fit(cv, mapStatus, rw - sz(32), sz(13), { font: 'bold' }), rx + sz(16), mapBoxY + sz(24), sz(13), sLearning ? '#ffb020' : S.stockNav && mode === 'both' ? '#22c55e' : '#aeb6c1', { literal: true, font: 'bold' });
+            const mby = mapBoxY + sz(36), mbh = sz(40);
+            button(cv, t, rx + sz(14), mby, Math.round(rw * 0.56), mbh,
+                sLearning ? (L ? 'გაუქმება' : 'Stop learning') : (L ? 'BMW რუკის სწავლა' : 'Learn BMW map'),
+                () => {
+                    if (sLearning) { follower.learning = null; if (snLearnTimer) { clearTimeout(snLearnTimer); snLearnTimer = null; } } else {
+                        follower.learn(Date.now());
+                        toast(L ? 'გახსენით BMW-ის რუკა გვერდითი მენიუდან: ნავიგაცია თავად დაბრუნდება' : 'Open the BMW map from the side menu (NAV): Navigation comes back by itself', 7000);
+                    }
+                    kick();
+                }, 'learn_stock', sLearning ? { primary: true, color: '#d97706' } : null);
+            if (S.stockNav) {
+                button(cv, t, rx + sz(22) + Math.round(rw * 0.56), mby, rw - sz(36) - Math.round(rw * 0.56), mbh,
+                    L ? 'დავიწყება' : 'Forget', () => { forgetStockNav(); toast(L ? 'BMW-ის რუკა დავიწყებულია' : 'BMW map forgotten: it opens as stock'); kick(); }, 'forget_stock');
             }
 
             // Console NAV Button Takeover controls at bottom of right panel
@@ -919,16 +948,93 @@ mgu.run({
          * read-only feed (abstract socket @mgu-nav-buttons, kit/renderd/inputgate) and, when app.json names it,
          * the FrontCCU button field over SOME/IP. Learning and matching: navkey.js.
          */
-        let navSrv = null, navSeen = 0, lastOpen = 0, learnTimer = null;
-        const openSelf = (tries) => {
+        let navSrv = null, navSeen = 0, lastOpen = 0, learnTimer = null, lastShownAt = 0;
+        const openSelf = (tries, askedAt) => {
             try {
                 const desc = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'rhmiData', 'application.json'), 'utf8'));
                 const ep = desc.application && desc.application.entryPoints && desc.application.entryPoints[0];
                 if (ep && ui.rhmi && ui.rhmi.openEntryState) Promise.resolve(ui.rhmi.openEntryState(ep.uuid)).catch((e) => log.warn('nav button: open: ' + e));
             } catch (e) { log.warn('nav button: ' + e.message); return; }
-            // the stock screen may come up after ours (the HMI handles NAV meanwhile): once more if ours is not in front
-            if (tries > 0) setTimeout(() => { if (!ui.isVisible('MAIN')) openSelf(tries - 1); }, 1500);
+            // the stock screen may come up after ours (the HMI handles NAV meanwhile): once more if ours never came to
+            // the front since it was asked for (shown and left with BACK in between: that is the driver's choice)
+            if (tries > 0) setTimeout(() => { if (!ui.isVisible('MAIN') && lastShownAt < askedAt) openSelf(tries - 1, askedAt); }, 1500);
         };
+        // the "Open Navigation" setting: the NAV button and the stock map (both), the NAV button only, or off
+        const openMode = () => settings.get('openOnNav') || 'both';
+        /** Open Navigation over the stock screen: the NAV button and the stock-map follower share one debounce. */
+        const requestOpen = (why, delay) => {
+            const now = Date.now();
+            if (now - lastOpen < 1500 || ui.isVisible('MAIN')) return;
+            lastOpen = now;
+            log.info(why + ': opening Navigation over the stock screen');
+            page = 0; S.sel = null;
+            setTimeout(() => openSelf(1, now), delay);
+            kick();
+        };
+
+        /*
+         * ---------- the stock BMW map: Navigation follows it (left menu bar's NAV, the tile, voice) ----------
+         * stocknav.js: mgu-render's surface lines (nav_watch) and / or a SOME/IP field (app.json config.stockNav).
+         * Rising edge only, disarmed after Navigation leaves (BACK lands on the stock map), never over the camera.
+         * The stock map's surface is learned on the Route page (kept in the data folder) or named in app.json.
+         */
+        const snCfg = (ctx.spec.config && ctx.spec.config.stockNav) || {};
+        const snFile = path.join(ctx.dataDir || '.', 'stock_nav.json');
+        let snSaved = null;
+        try { snSaved = JSON.parse(fs.readFileSync(snFile, 'utf8')); } catch (e) { /* not learned */ }
+        const follower = new StockNavFollower({
+            surfaceId: snSaved && snSaved.surfaceId != null ? snSaved.surfaceId : snCfg.surfaceId != null ? snCfg.surfaceId : null,
+            proc: (snSaved && snSaved.proc) || snCfg.proc || '',
+            minW: snCfg.minWidth || 800, minH: snCfg.minHeight || 400,
+        });
+        S.stockNav = follower.configured() ? { surfaceId: follower.o.surfaceId, proc: follower.o.proc, source: snSaved ? 'learned' : 'app.json' } : null;
+        let surfSeen = 0, snLearnTimer = null;
+        const finishStockLearn = () => {
+            if (snLearnTimer) { clearTimeout(snLearnTimer); snLearnTimer = null; }
+            const r = follower.learnDone(), L = ulang() === 'ka';
+            if (!r) return;
+            if (r.error) {
+                toast(r.error === 'none' ? (L ? 'BMW-ის რუკა ვერ დავინახე: სცადეთ ისევ' : 'Did not see the BMW map open: try again (side menu > NAV)')
+                    : (L ? 'რამდენიმე ეკრანი გაიხსნა: სცადეთ ისევ' : 'Several screens opened at once: try again'), 6000);
+                log.info('stock map: learning: ' + r.error);
+            } else {
+                S.stockNav = { surfaceId: r.surfaceId, proc: r.proc, source: 'learned' };
+                try { fs.writeFileSync(snFile, JSON.stringify({ surfaceId: r.surfaceId, proc: r.proc, w: r.w, h: r.h, at: Date.now() })); } catch (e) { /* read-only */ }
+                log.info('stock map learned: surface ' + r.surfaceId + ' (' + r.proc + ', ' + r.w + 'x' + r.h + ')');
+                toast(L ? 'BMW-ის რუკა ნასწავლია: ნავიგაცია ახლა მის ნაცვლად გაიხსნება' : 'BMW map learned: Navigation now opens in its place', 6000);
+                requestOpen('stock map learned', 200);
+            }
+            kick();
+        };
+        const forgetStockNav = () => {
+            follower.o.surfaceId = null; follower.o.proc = '';
+            S.stockNav = null;
+            try { fs.unlinkSync(snFile); } catch (e) { /* none */ }
+        };
+        const onStockEdge = (res, why) => { if (res === 'open' && openMode() === 'both') requestOpen(why, 150); };
+        const onSurfaceLine = (line) => {
+            const r = parseSurface(line);
+            if (!r) return;
+            if (surfSeen++ < 60 || follower.learning) log.info('surface: ' + line.trim());
+            onStockEdge(follower.surface(r, Date.now()), 'stock map shown (surface ' + r.id + ')');
+            // learning: the driver opened the stock map; a moment for the rest of the screen to settle, then done
+            if (follower.learning && follower.learning.cands.size && !snLearnTimer) snLearnTimer = setTimeout(finishStockLearn, 1500);
+        };
+        const snTimer = setInterval(() => {
+            follower.tick(Date.now());
+            if (follower.learning && follower.learning.result) finishStockLearn();
+        }, 1000);
+        if (snTimer.unref) snTimer.unref();
+        if (snCfg.iface && snCfg.field && ctx.signals && ctx.signals.watch) {
+            const pairs = navkey.parse(snCfg.match || '');
+            const h = {};
+            h[snCfg.field] = (v) => {
+                const on = pairs ? navkey.matches(pairs, navkey.fromValue(v)) : !!v;
+                onStockEdge(follower.state('someip', on, Date.now()), 'stock map shown (' + snCfg.iface.split('.').pop() + '.' + snCfg.field + ')');
+            };
+            ctx.signals.watch(snCfg.iface, snCfg.instance || '1', h, log)
+                .then((s) => log.info('stock map: ' + snCfg.iface + '.' + snCfg.field + (s.error ? ' error: ' + s.error : ' subscribed')));
+        }
         const finishLearning = () => {
             learnTimer = null;
             const L = ulang() === 'ka', r = navkey.learn(S.learn ? S.learn.samples : []);
@@ -954,13 +1060,8 @@ mgu.run({
                 kick();
                 return;
             }
-            if (S.navKey && navkey.matches(S.navKey.pairs, sample) && Date.now() - lastOpen > 1500) {
-                lastOpen = Date.now();
-                log.info('NAV pressed: opening Navigation over the stock screen');
-                page = 0; S.sel = null;
-                setTimeout(() => openSelf(1), 400);
-                kick();
-            }
+            // the physical NAV button opens Navigation whatever the stock-map follower's state (only "off" stops it)
+            if (S.navKey && navkey.matches(S.navKey.pairs, sample) && openMode() !== 'off') requestOpen('NAV pressed', 400);
         };
         if (process.platform === 'linux') {
             navSrv = require('net').createServer((sock) => {
@@ -968,8 +1069,12 @@ mgu.run({
                 sock.setEncoding('latin1');
                 sock.on('data', (d) => { buf += d; if (buf.length > 1024) sock.destroy(); });
                 sock.on('end', () => {
-                    const hex = (buf.trim().split(' ')[2] || '').toLowerCase();
-                    if (/^[0-9a-f]{2,128}$/.test(hex)) onButton(navkey.fromHex(hex), 'gate');
+                    // one line a connection: the gate's button ("<ms> <len> <hex>") or mgu-render's surface line
+                    buf.split('\n').forEach((line) => {
+                        if (/^\d+ surface /.test(line)) { onSurfaceLine(line); return; }
+                        const hex = (line.trim().split(' ')[2] || '').toLowerCase();
+                        if (/^[0-9a-f]{2,128}$/.test(hex)) onButton(navkey.fromHex(hex), 'gate');
+                    });
                 });
                 sock.on('error', () => {});
             });
@@ -1014,6 +1119,7 @@ mgu.run({
             clearInterval(memTimer);
             try { track(false); } catch (e) {}
             try { if (navSrv) navSrv.close(); } catch (e) {}
+            clearInterval(snTimer);
             try { packs.forEach((p) => p && p.close && p.close()); } catch (e) {}
         };
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', cleanup);
@@ -1083,13 +1189,15 @@ mgu.run({
         /* ---------- foreground / background lifecycle ---------- */
         const fps = () => {
             const max = Number(settings.get('fps')) || 60, fix = pos.fix();
-            const moving = (fix && fix.speed > 0.5) || Math.abs(zoomWant - zoomLog) > 0.01 || page === 1 || (S.toast && Date.now() < S.toast.until) || S.crosshair || !!S.learn;
+            const moving = (fix && fix.speed > 0.5) || Math.abs(zoomWant - zoomLog) > 0.01 || page === 1 || (S.toast && Date.now() < S.toast.until) || S.crosshair || !!S.learn || !!follower.learning;
             // the route overview and country zoom draw the most and change the least: 15 fps, unless a finger is on it
             const far = page === 0 && (S.overview || view.camera.mpp > 40) && Date.now() - S.lastTouch > 1500;
             return page === 2 && !moving ? 6 : moving ? (far ? Math.min(max, 15) : max) : 4;
         };
         ui.onVisible((name, v) => {
             if (name !== 'MAIN') return;
+            follower.appVisible(v, Date.now());
+            if (v) lastShownAt = Date.now();
             if (v) { track(true); pos._tick(); kick(); }
             else if (!S.route && !(ctx.widget && ctx.widget.active())) track(false);          // guidance / widget keeps track of the car off screen
         });

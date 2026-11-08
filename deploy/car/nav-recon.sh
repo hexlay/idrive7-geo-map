@@ -22,6 +22,14 @@
 # What changes between them (a surface shown, a process busy, a SOME/IP service sending) is where
 # CarPlay's cluster map and turn arrows go.
 #
+# The stock BMW map, so Navigation can open in its place however it is opened (left menu bar NAV, the tile, voice):
+#   1. LABEL=base SNIFF=60 sh nav-recon.sh       the home screen, the BMW map closed
+#   2. LABEL=stocknav SNIFF=60 sh nav-recon.sh   the BMW map open, opened from the left menu bar
+#   node kit/tools/nav-recon-diff.js nav-recon-base-<time> nav-recon-stocknav-<time>
+# A surface turning visible at full size is the stock map's (osm_nav learns it on the car anyway: Route page,
+# Learn BMW map, with mgu-render's nav_watch); none: the HMI draws the map itself, and the SOME/IP flow that
+# changes is the one for app.json config.stockNav (iface, field, match).
+#
 # Collects, without changing anything on the unit:
 #   1. SOME/IP: every interface in /etc/oap/someip/someip-interfaces.json about positioning,
 #      GNSS / GPS, navigation guidance, the head-up display, the instrument cluster (KombiIF,
@@ -316,8 +324,10 @@ Next steps
                   "lat": "<path.in.value>", "lon": "<path>", "heading": "<path>", "speed": "<path>",
                   "scale": { "lat": 1e-7, "lon": 1e-7 } } ] }
     (someip-position-types.json has the struct of that field; the scale makes degrees of it.)
-  * ivi-list.txt: the surface of the stock map (its owning pid in processes.txt) is the one to hide
-    or cover in phase 2 - never stop that process.
+  * ivi-list.txt: the surface of the stock map (its owning pid in processes.txt): with LABEL=base (home
+    screen) and LABEL=stocknav (the BMW map opened from the left menu bar), nav-recon-diff.js shows it turning
+    visible. Navigation follows it (app.json config.stockNav; or learn it on the Route page). Never stop that
+    process, never hide its surface: Navigation opens over it.
   * The console's NAV button: Navigation opens itself over the stock screen when NAV is pressed (the HMI still
     gets the button: nothing is blocked, and with the app not running NAV is stock). Its Route page learns the
     button (press NAV three times) from either source:
