@@ -104,6 +104,26 @@ function layer(key, w, h, draw, textScale) {
 }
 function onLayerDrop(fn) { layerDrop = fn; }
 
+/**
+ * A QR code (qrcodegen.QrCode) at x, y, px logical px a module: its dark modules in black over what is drawn under
+ * it (a white card). Recorded once as a layer for what it encodes (key) and the module size: one op a frame instead
+ * of a rectangle per dark module (about 1300 for a pairing link), and each row's run of dark modules is one rectangle.
+ */
+function qrCode(cv, qr, key, x, y, px) {
+    const n = qr.size;
+    cv.blit(layer(['qr', key, px].join('|'), n * px, n * px, (c) => {
+        for (let r = 0; r < n; r++) {
+            for (let m = 0; m < n;) {
+                if (!qr.getModule(m, r)) { m++; continue; }
+                let e = m + 1;
+                while (e < n && qr.getModule(e, r)) e++;
+                c.fillRect(m * px, r * px, (e - m) * px, px, '#000000');
+                m = e;
+            }
+        }
+    }, cv.textScale), x, y);
+}
+
 /** Colour of value v: the zone it falls in, else `base` (default accent). */
 function zoneColor(t, g, v, base) {
     let c = base || t.accent;
@@ -863,7 +883,7 @@ function stripes(cv, t, x, y, w) {
     s.forEach((c, i) => cv.roundRect(x + i * sw, y, sw - (i < s.length - 1 ? 4 : 0), 4, 2, c));
 }
 
-module.exports = {
+module.exports = { qrCode,
     BAR_H, TOP, BOTTOM, pageBottom, MARGIN, toMargin, frame, header, layer, onLayerDrop, panel, panelExact: box, segBar, radial, needle, ring, bar, stat, readout,
     shiftLights, gear, chart, table, pill, tyres, gmeter, menuBar, stripes, button, onConfirm, smooth, hold, niceStep,
     fmt, isNum, clamp, mix, zoneColor, withAlpha, ramp,

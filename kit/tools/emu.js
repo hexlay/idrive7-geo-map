@@ -3,7 +3,7 @@
  * emu.js - live emulator: a built app running with the real runtime, drawn in the browser by the car's
  * GPU draw engine (kit/renderd/src/gfx.c as WebAssembly, kit/emu/web/gfx/).
  *
- *   node kit/tools/emu.js redline [--port 8077] [--bg screenshot.png] [--no-touch]   ->  http://localhost:8077 (this computer only)
+ *   node kit/tools/emu.js redline [--port 8077] [--bg screenshot.png] [--no-touch] [--no-controller]   ->  http://localhost:8077 (this computer only)
  *
  * Three parts in this process:
  *   app       python3 kit/tools/build.py <id>, then dist/<id> in a child node (hu-stub.js: a stubbed head
@@ -53,6 +53,9 @@ const { spawn, fork } = require('child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const WEB = path.join(ROOT, 'kit', 'emu', 'web');
 const args = process.argv.slice(2);
+// --no-controller: X_READY says the controller gate is not ours (another renderer holds its event socket, as after
+// the Store's renderer restarted: idrive7-apps#81); the app should ask for it anyway
+const NO_CONTROLLER = args.indexOf('--no-controller') >= 0;
 const opt = (k, d) => { const i = args.indexOf(k); if (i < 0) return d; const v = args[i + 1]; args.splice(i, 2); return v; };
 const PORT = Number(opt('--port', 8077));
 const BG = (() => { const b = opt('--bg', null); return b ? path.resolve(b) : null; })();
@@ -277,7 +280,7 @@ function handle(c, type, p, whole) {
         if (f.slice(1).indexOf('proto=mgu-render/1') >= 0) {
             c.dialect = 'native';
             // version 1, layer mode, caps: touch routing (if on) | controller gate | pixmaps; no embed; app area; pixmap side; 60 Hz
-            toApp(msg(X.READY, [1, 1, (c.touch ? 1 : 0) | 2 | 8, 0, 0, 0, 0, 108, 82, 1790, 638, 2048, 60000]));
+            toApp(msg(X.READY, [1, 1, (c.touch ? 1 : 0) | (NO_CONTROLLER ? 0 : 2) | 8, 0, 0, 0, 0, 108, 82, 1790, 638, 2048, 60000]));
         }
         toApp(msg(E.READY, [4, SCREEN.w, SCREEN.h, c.touch ? 1 : 0]));
         appLog('info', 'renderer: ' + c.app + ' connected' + (c.dialect ? ', mgu-render/1' : ''));
@@ -336,7 +339,9 @@ function handle(c, type, p, whole) {
     case M.FPS: if (c.dialect !== 'upstream') { c.fps = Math.min(1000, u(0)); C.fps = whole; connChanged(); } break;
     case M.VIDEO: if (c.dialect !== 'upstream') res('video:' + u(0), true); break;
     case M.DROP_VIDEO: res('video:' + u(0), false); break;
-    case X.GRAB: c.grab = !!u(0); C.grab = whole; connChanged(); break;
+    case X.GRAB:
+        if (c.grab !== !!u(0)) appLog('info', 'renderer: controller ' + (u(0) ? 'grabbed by ' : 'released by ') + c.app);
+        c.grab = !!u(0); C.grab = whole; connChanged(); break;
     case X.PIXMAP: {
         const w = u(1), h = u(2), f = u(3);
         // (a bad size or format is the renderer's ERROR, not a dropped client: nothing to keep then)

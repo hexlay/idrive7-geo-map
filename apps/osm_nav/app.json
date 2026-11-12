@@ -2,7 +2,7 @@
   "id": "osm_nav",
   "title": "Navigation",
   "description": "Offline OpenStreetMap navigation for Georgia (Georgian and English) in place of the BMW map: GPU map at 60 fps, turn-by-turn guidance, speed limits, and the console's NAV button",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "vendor": "custom",
   "loggingId": "OANV",
   "iconGlyph": "nav",

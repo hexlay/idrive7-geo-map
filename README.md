@@ -53,7 +53,7 @@ This repository is built on the open-source BMW iDrive 7 platform:
 
 | Version | Needs internet | Touches vehicle ECUs |
 | :---: | :---: | :--- |
-| 1.0.1 | No | No (reads speed, acceleration, gear, fuel level and range; writes nothing) |
+| 1.0.2 | No | No (reads speed, acceleration, gear, fuel level and range; writes nothing) |
 
 * **The map**: all of Georgia from OpenStreetMap, on the car (no internet), drawn by the GPU, heading up or north up, day and night colours, street names in Georgian, English or both, road numbers (ს1 / S1, E60).
 * **Guidance**: routes are planned on the car (fastest, avoid tolls, avoid motorways), with the next turn, its distance and street, roundabout exits, the arrival time, a new route when you leave it, and the speed limit of the road where OpenStreetMap has it (BMW style sign, red when you are over it).

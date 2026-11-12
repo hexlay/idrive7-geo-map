@@ -219,11 +219,22 @@ class Display {
         this.grabbing = !!on;
         this._grab();
     }
-    /** held: the app asked (grab), or the kit runs the screen (own) and the HMI has the controller gate */
+    /**
+     * held: the app asked (grab), or the kit runs the screen (own). Asked for whatever X_READY said of the
+     * controller: X_READY comes once a connection and says "no" while another renderer holds the gate's event
+     * socket (the Store's, after it restarted), so a kit that asked only on "yes" kept the knob dead until the
+     * head unit restarted (idrive7-apps#81). Asking while the socket is taken, or without the gate in the HMI, is
+     * harmless: the renderer diverts the knob only once the socket is its own (it tries again every 5 s), and
+     * until then the HMI keeps it (its focus events drive the bar, as without a grab).
+     */
     _grab() {
         if (!this.gpu) return;
-        const gate = !this.gpu.native || !this.gpu.info || this.gpu.info.controller;
-        this.gpu.grab(this.grabbing || (this.own() && gate && !process.env.MGU_NO_GRAB));
+        const want = this.grabbing || (this.own() && !process.env.MGU_NO_GRAB);
+        if (want && this.gpu.native && this.gpu.info && !this.gpu.info.controller && !this.grabNoted) {
+            this.grabNoted = true;
+            this.log.info('display: the renderer has no controller for us yet (its event socket taken, or no gate): asked anyway');
+        }
+        this.gpu.grab(want);
     }
 
     /** The kit runs the screen: mgu-render/1 with touch, full-screen layout. */
