@@ -1,0 +1,61 @@
+name: Tests
+
+# Navigation's and the kit's checks: no SDK, renderer or car needed. The head unit runs Node 8: 8.9.4 on 2019 units
+# (firmware D_19w31, mgu-store#148), 8.16.2 on later ones. Code that only works on a newer Node passes on a PC and
+# fails in the car (idrive7-apps#114), so everything that runs in the car is checked on both.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  head-unit-node:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['8.9.4', '8.16.2']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version
+      - name: Syntax of everything that runs in the car
+        run: git ls-files 'apps/*.js' 'kit/runtime/*.js' 'kit/renderd/js/*.js' 'kit/renderd/prebuilt/*.js' 'kit/tools/oapgen/*.js' 'deploy/*.js' | xargs -n1 node --check
+      # the map is not in git: the hexlay/idrive7-geo-map-data release apps/osm_nav/app.json names, checked
+      - uses: actions/cache@v4
+        with:
+          path: kit/tools/.osm-cache
+          key: osm-map-${{ hashFiles('apps/osm_nav/app.json') }}
+      - name: The map
+        run: |
+          read url sha <<< "$(node -e "const m = require('./apps/osm_nav/app.json').maps[0]; console.log(m.url + ' ' + m.gzSha256)")"
+          f="kit/tools/.osm-cache/$sha.pack.gz"
+          mkdir -p kit/tools/.osm-cache
+          [ -f "$f" ] || curl -sSfL --retry 3 -o "$f" "$url"
+          echo "$sha  $f" | sha256sum -c -
+      - run: node kit/tools/test_osm_nav.js
+      - run: node kit/tools/test_nav_recon_diff.js
+      - run: node kit/tools/test_diag_options.js
+      - run: node kit/tools/test_zh.js
+      - run: node kit/renderd/test/test_gate_apps.js
+
+  pc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: node kit/tools/test_nav_recon_diff.js
+      - run: node kit/tools/test_diag_options.js
+      - run: node kit/tools/test_zh.js
+      - run: python3 kit/tools/test_zh.py
+      - run: node kit/renderd/test/test_gate_apps.js

@@ -8,6 +8,11 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 LOCALES = ROOT / 'kit/runtime/locales'
 
 
+def normalize_language(language):
+    """Accept regional Korean CLI tags while keeping one catalog/package identity (as idrive7-apps)."""
+    return 'ko' if language.lower().replace('_', '-') in ('ko', 'ko-kr') else language
+
+
 def zh_credit():
     """The translation credit (corner, settings rows, entry comment): Chinese (zh-CN) builds only."""
     return json.loads((ROOT / 'kit/localization/credit.zh-CN.json').read_text(encoding='utf-8'))

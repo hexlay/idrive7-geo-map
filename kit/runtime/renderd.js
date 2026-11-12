@@ -93,6 +93,7 @@ class RenderClient extends EventEmitter {
         s.on('connect', () => {
             this.connected = true;
             this._reset();
+            this.inbuf = Buffer.alloc(0);   // (a message cut off with the last connection)
             s.setNoDelay && s.setNoDelay(true);
             this.native = false; this.info = null; this.onScreen = null;
             this.claimed = null;
@@ -167,6 +168,22 @@ class RenderClient extends EventEmitter {
         if (this.fd !== null) { fs.writeSync(this.fd, b); return true; }
         return this.sock && this.connected ? this.sock.write(b) : false;
     }
+    /* A buffer for one IMAGE message of `size` bytes: the one kept for that size once the socket has passed
+     * it on (a big picture every frame - DOOM's 1920 x 504 view - would otherwise leave two new copies of
+     * several MB a frame, which Node 8 frees late: the app's memory grows until the app manager stops it). */
+    _imageBuf(size) {
+        const pool = this.imgPool || (this.imgPool = new Map());
+        const free = this.fd !== null || !this.sock || this.sock.bufferSize === 0;
+        let b = free ? pool.get(size) : null;
+        if (!b) {
+            b = Buffer.allocUnsafe(size);
+            if (size >= 65536) {
+                if (pool.size >= 4) pool.delete(pool.keys().next().value);
+                pool.set(size, b);
+            }
+        }
+        return b;
+    }
     _u32msg(type, arr) { const u = new Uint32Array(arr); return msg(type, words(u)); }
 
     _data(d) {
@@ -236,7 +253,10 @@ class RenderClient extends EventEmitter {
         if (this.placement && !resize && ['x', 'y', 'scale', 'ox', 'oy'].every((k) => pl[k] === this.placement[k])) return;
         const scaleChanged = this.placement && this.placement.scale !== pl.scale;
         this.placement = Object.assign({}, pl);
-        if (resize || scaleChanged) this._reset();     // the renderer dropped our resources
+        // as the renderer: a new size drops all the app's resources, a new scale keeps them but the layers drawn at
+        // the old one (sent again, they replace those)
+        if (resize) this._reset();
+        else if (scaleChanged) { this.sent.layer.clear(); this.waiting = false; }
         if (this.ready) this._sendPlace();
     }
     _sendPlace() {
@@ -282,11 +302,12 @@ class RenderClient extends EventEmitter {
         const im = rec.imageById.get(id);
         if (!im || !im.data) return;
         if (this.sent.image.get(id) === im.ver) return;
-        const head = Buffer.alloc(12);
-        head.writeUInt32LE(id, 0); head.writeUInt32LE(im.w, 4); head.writeUInt32LE(im.h, 8);
-        const px = Buffer.from(im.data.buffer, im.data.byteOffset, im.w * im.h * 4);
-        const imgMsgType = this.native ? 10 : 9;
-        this._write(msg(imgMsgType, Buffer.concat([head, px])));
+        // IMAGE is 9 in the upstream dialect, 10 in iterio's and mgu-render/1 (premultiplied there, up to 1024 px)
+        const n = im.w * im.h * 4, b = this._imageBuf(8 + 12 + n);
+        b.writeUInt32LE(this.native ? 10 : M.IMAGE, 0); b.writeUInt32LE(12 + n, 4);
+        b.writeUInt32LE(id, 8); b.writeUInt32LE(im.w, 12); b.writeUInt32LE(im.h, 16);
+        Buffer.from(im.data.buffer, im.data.byteOffset, n).copy(b, 20);
+        this._write(b);
         this.sent.image.set(id, im.ver);
     }
     _ensureLayer(id) {

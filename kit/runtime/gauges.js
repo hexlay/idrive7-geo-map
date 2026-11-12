@@ -617,7 +617,8 @@ function tyres(cv, t, x, y, w, h, g) {
  */
 function gmeter(cv, t, cx, cy, r, g) {
     const max = g.max || 1.5;
-    const key = ['gmeter', r, max, t.name].join('|'), S = Math.ceil(r + 4);
+    const flip = !!g.flipLong;                  // brake on top, accel at the bottom (issue #72)
+    const key = ['gmeter', r, max, t.name, flip].join('|'), S = Math.ceil(r + 4);
     cv.blit(layer(key, 2 * S + 80, 2 * S, (c) => {
         const x = S, y = S;
         for (let ring_ = 0.5; ring_ <= max + 1e-6; ring_ += 0.5) {
@@ -627,10 +628,10 @@ function gmeter(cv, t, cx, cy, r, g) {
         }
         c.line(x - r, y, x + r, y, 2, withAlpha(t.tick, 0.6));
         c.line(x, y - r, x, y + r, 2, withAlpha(t.tick, 0.6));
-        c.text('BRAKE', x, y + r - 14, 22, t.dim, { align: 'center', font: 'bold', spacing: 1.5 });
-        c.text('ACCEL', x, y - r + 32, 22, t.dim, { align: 'center', font: 'bold', spacing: 1.5 });
+        c.text(flip ? 'ACCEL' : 'BRAKE', x, y + r - 14, 22, t.dim, { align: 'center', font: 'bold', spacing: 1.5 });
+        c.text(flip ? 'BRAKE' : 'ACCEL', x, y - r + 32, 22, t.dim, { align: 'center', font: 'bold', spacing: 1.5 });
     }, cv.textScale), Math.round(cx) - S, Math.round(cy) - S);
-    const P = (lat, lon) => [cx + clamp(lat / max, -1.1, 1.1) * r, cy - clamp(lon / max, -1.1, 1.1) * r];
+    const P = (lat, lon) => [cx + clamp(lat / max, -1.1, 1.1) * r, cy + (flip ? 1 : -1) * clamp(lon / max, -1.1, 1.1) * r];
     const tr = g.trail || [];
     tr.forEach((p, i) => {
         if (!isNum(p[0]) || !isNum(p[1])) return;
@@ -766,7 +767,8 @@ function headerCompact(cv, t, x, y, w, h, title, tabs, sel, badges, k) {
     while (tf > 18 && names.reduce((a, n) => a + cv.textWidth(n, tf, opt) + 20, 0) > room - 20) tf--;
     const tw = tabWidths(cv, names, tf, opt, Math.round(132 * z), Math.round(44 * z), room - 20, 20);
     const tabsW = tw.reduce((a, b) => a + b, 0);
-    const showTitle = title && titleW + 32 + tabsW <= room;
+    // the tabs start 20 px in: the name shows only where every tab still fits after it (else the last tab, Settings, drops)
+    const showTitle = title && 20 + titleW + 32 + tabsW <= room;
     // only as wide as the content: the rest of the strip stays the HMI's
     let end = x + 20 + (showTitle ? titleW + 32 : 0);
     names.forEach((n, i) => { if (end + tw[i] <= x + room) end += tw[i]; });

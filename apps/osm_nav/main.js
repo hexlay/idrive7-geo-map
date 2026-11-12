@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const mgu = require('./kit/mgu');
+const { writeWhole } = require('./kit/write_whole');
 const G = require('./kit/gauges');
 const { withAlpha } = require('./kit/canvas');
 const { MapPack, merc, unmerc, groundScale } = require('./mappack');
@@ -667,7 +668,7 @@ mgu.run({
             const pairs = navkey.parse(text);
             S.navKey = pairs ? { text, pairs, source: source || '' } : null;
             try {
-                if (pairs) fs.writeFileSync(navBtnFile, JSON.stringify({ match: text, source: source || '', at: Date.now() }));
+                if (pairs) writeWhole(navBtnFile, JSON.stringify({ match: text, source: source || '', at: Date.now() }));
                 else fs.unlinkSync(navBtnFile);
             } catch (e) { /* read-only (preview) */ }
         }
@@ -999,7 +1000,7 @@ mgu.run({
                 log.info('stock map: learning: ' + r.error);
             } else {
                 S.stockNav = { surfaceId: r.surfaceId, proc: r.proc, source: 'learned' };
-                try { fs.writeFileSync(snFile, JSON.stringify({ surfaceId: r.surfaceId, proc: r.proc, w: r.w, h: r.h, at: Date.now() })); } catch (e) { /* read-only */ }
+                try { writeWhole(snFile, JSON.stringify({ surfaceId: r.surfaceId, proc: r.proc, w: r.w, h: r.h, at: Date.now() })); } catch (e) { /* read-only */ }
                 log.info('stock map learned: surface ' + r.surfaceId + ' (' + r.proc + ', ' + r.w + 'x' + r.h + ')');
                 toast(L ? 'BMW-ის რუკა ნასწავლია: ნავიგაცია ახლა მის ნაცვლად გაიხსნება' : 'BMW map learned: Navigation now opens in its place', 6000);
                 requestOpen('stock map learned', 200);

@@ -23,6 +23,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { writeWhole } = require('./kit/write_whole');
 const { F, merc, groundScale } = require('./mappack');
 const { bearing, turnAngle } = require('./router');
 
@@ -337,7 +338,8 @@ class Position {
         const c = this.cur;
         if (!c || (c.source === 'demo' && !force)) return;
         this.savedAt = Date.now();
-        try { fs.writeFileSync(this.file, JSON.stringify({ x: c.x, y: c.y, heading: c.heading, at: Date.now() })); } catch (e) { /* read-only (preview) */ }
+        // whole or not at all: the car switching off mid-write would leave no saved position for the next start
+        try { writeWhole(this.file, JSON.stringify({ x: c.x, y: c.y, heading: c.heading, at: Date.now() })); } catch (e) { /* read-only (preview) */ }
     }
 
     /* ---------- the demo drive ---------- */

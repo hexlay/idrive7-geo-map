@@ -113,7 +113,7 @@ class Fuel {
     _saveLevel() {
         const f = this._levelFile();
         if (!f || !this.car || typeof this.car.litres !== 'number') return;
-        try { require('fs').writeFileSync(f, JSON.stringify({ litres: this.car.litres, at: Date.now() })); } catch (e) { /* read-only (preview) */ }
+        try { require('./kit/write_whole').writeWhole(f, JSON.stringify({ litres: this.car.litres, at: Date.now() })); } catch (e) { /* read-only (preview) */ }
     }
 
     /** The demo drive used dKm of fuel's worth of road (called each frame while the demo drives). */

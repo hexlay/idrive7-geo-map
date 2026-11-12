@@ -291,7 +291,8 @@ function runLive(stage, dataDir) {
     const log = {};
     ['error', 'warn', 'info', 'debug'].forEach((l) => { log[l] = (...a) => { if (l !== 'debug' || process.env.MGU_DEBUG) send({ t: 'log', l, s: fmt(a) }); }; });
     console.log = log.info; console.info = log.info; console.warn = log.warn; console.error = log.error;
-    fs.mkdirSync(dataDir, { recursive: true });
+    // (no recursive option on Node 8: made one level at a time)
+    (function mkdirp(dir) { if (fs.existsSync(dir)) return; mkdirp(path.dirname(dir)); fs.mkdirSync(dir); })(dataDir);
     // software path frames (renderer setting "software", or before the renderer is up): a few a second
     let softCv = null, softTimer = null, softT = 0;
     const flushSoft = () => {

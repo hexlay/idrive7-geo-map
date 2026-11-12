@@ -105,6 +105,16 @@ process.on('exit', (code) => {
 
 /* ---------------- settings (persisted in data/settings.json) ---------------- */
 class Settings {
+    /**
+     * Write a file whole or not at all: a temp file renamed over it (a reader or a power cut never sees half).
+     * In the class: hu-stub.js and test_runtime.js run this class on its own, cut from this file.
+     */
+    static writeWhole(file, text) {
+        const tmp = file + '.' + process.pid + '.tmp';
+        fs.writeFileSync(tmp, text);
+        fs.renameSync(tmp, file);
+    }
+
     constructor(schema) {
         this.schema = schema || [];
         this.file = path.join(DATA_DIR, 'settings.json');
@@ -112,11 +122,19 @@ class Settings {
         this.listeners = [];
         for (const s of this.schema) this.values[s.key] = s.default;
         try { Object.assign(this.values, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch (e) {}
+        // "aliases": { old value: new value } - a value saved before the setting's values were renamed
+        for (const s of this.schema) {
+            if (s.aliases && Object.prototype.hasOwnProperty.call(s.aliases, this.values[s.key])) this.values[s.key] = s.aliases[this.values[s.key]];
+        }
         // one-time move of saved settings to the new default theme (M Tricolour); later choices are kept
         const th = this.item('theme');
-        if (th && fs.existsSync(this.file) && this.values._themeV !== 2) {
-            this.values.theme = th.default; this.values._themeV = 2;
-            try { fs.writeFileSync(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { /* read-only */ }
+        if (th && this.values._themeV !== 2) {
+            const saved = fs.existsSync(this.file);
+            this.values._themeV = 2;            // (a fresh install has the default: the mark is saved with its first setting)
+            if (saved) {
+                this.values.theme = th.default;
+                try { Settings.writeWhole(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { /* read-only */ }
+            }
         }
         // a setting with "reset": n in app.json goes back to its default once when n changes
         // (a new default reaches cars that saved the old one); later choices are kept
@@ -125,16 +143,25 @@ class Settings {
             const mark = '_reset_' + it.key;
             if (it.reset && this.values[mark] !== it.reset) { this.values[it.key] = it.default; this.values[mark] = it.reset; changed = true; }
         }
-        if (changed && fs.existsSync(this.file)) try { fs.writeFileSync(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { /* read-only */ }
+        if (changed && fs.existsSync(this.file)) try { Settings.writeWhole(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { /* read-only */ }
     }
     get(key) { return this.values[key]; }
     set(key, value) {
         this.values[key] = value;
-        try { fs.writeFileSync(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { log.warn('settings save: ' + e); }
+        try { Settings.writeWhole(this.file, JSON.stringify(this.values, null, 1)); } catch (e) { log.warn('settings save: ' + e); }
         this.listeners.forEach((fn) => { try { fn(key, value); } catch (e) { log.error(e); } });
     }
     onChange(fn) { this.listeners.push(fn); }
     item(key) { return this.schema.find((s) => s.key === key); }
+    /**
+     * Whether a setting is offered: not "hidden", and its "when" holds - { key: value or [values] }, each other
+     * setting at one of them (e.g. "when": { "diagPage": true }, "when": { "torqueUnit": "kgm" }). Its value
+     * stays as it is while it is not offered.
+     */
+    shown(s) {
+        if (!s || s.hidden) return false;
+        return !s.when || Object.keys(s.when).every((k) => [].concat(s.when[k]).indexOf(this.values[k]) >= 0);
+    }
     /** Human text for the current value of a setting. */
     display(key) {
         const s = this.item(key), v = this.values[key];
@@ -453,13 +480,17 @@ class Widget {
 /* ---------------- generic settings screen ---------------- */
 function wireSettings(ctx) {
     const { ui, settings } = ctx;
-    const schema = settings.schema;
+    // hidden settings (kept by the app itself, never on a screen) have no component to look up
+    const schema = settings.schema.filter((s) => !s.hidden);
     // the settings screen, or an app's own menu screen that shows them ("settings": true)
     if (!schema.length || !schema.some((s) => ui.comp('SET_' + s.key.toUpperCase()))) return;
     // choice / number settings are drop-downs (kit/tools/build.py): their rows are the values in this order
     const values = (s) => (s.type === 'choice' ? (s.options || []).map((o) => o[0]) : s.type === 'number' ? s.steps || [] : null);
     const refresh = () => Promise.all(schema.map((s) => {
         const comp = 'SET_' + s.key.toUpperCase();
+        if (!ui.comp(comp)) return null;
+        // one another setting offers it ("when"): shown or not as that one is
+        if (s.when) ui.visible(comp, settings.shown(s));
         if (s.type === 'bool') return Promise.all([ui.text(comp, s.label), ui.checked(comp, !!settings.get(s.key))]);
         if (values(s)) return ui.selected(comp, Math.max(0, values(s).indexOf(settings.get(s.key))));
         // other types: two-row buttons in the wide settings state, label above, value below
@@ -530,6 +561,17 @@ async function runInner(impl) {
     }
     await app.start();
     active();
+    const settings = new Settings(SPEC.settings);
+    // impl.background(bg): what the app does with or without its screens (app.json "autostart": true, an app the
+    // platform starts by itself); bg = { app, log, settings, signals, spec, dataDir }. What it returns is
+    // ctx.background for impl.start.
+    let background = null;
+    if (impl && impl.background) {
+        try {
+            background = await impl.background({ app, log, settings, signals: require('./signals'), spec: SPEC, dataDir: DATA_DIR });
+        } catch (e) { log.error('background start: ' + (e && e.stack || e)); }
+        if (!app.rhmiApplication) { log.info('no screens for this start: running in the background'); return; }
+    }
     if (!app.rhmiApplication) {
         // The SDK did not create the app's screens: nothing can be shown. Stay up (idle) rather than throw: a
         // crash makes CorruptAppsHandler wipe the app's data, and a second one uninstalls it (issue #39).
@@ -540,12 +582,11 @@ async function runInner(impl) {
         return;
     }
     const ui = new Ui(app);
-    const settings = new Settings(SPEC.settings);
     const display = new Display(ui, log, SPEC, settings, () => themes.theme(settings.get('theme')));
     ui.display = display;
     if (SPEC.mguInternet) { try { log.info('uplink: ' + uplink.describe()); } catch (e) {} }
     const ctx = {
-        app, ui, settings, log, spec: SPEC, dataDir: DATA_DIR, display, widget, uplink,
+        app, ui, settings, log, spec: SPEC, dataDir: DATA_DIR, display, widget, uplink, background,
         signals: require('./signals'),
         theme: () => themes.theme(settings.get('theme')),
         /**

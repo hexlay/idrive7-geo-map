@@ -28,7 +28,9 @@ for (let i = 0; i < args.length; i++) {
     else if (args[i] === '--set') { const [k, v] = args[++i].split('='); sets[k] = isNaN(Number(v)) ? (v === 'true' ? true : v === 'false' ? false : v) : Number(v); }
     else clicks.push(args[i]);
 }
-fs.mkdirSync(out, { recursive: true });
+// (mkdirSync's recursive option is Node 10.12+: on the head unit's Node 8 it is ignored and throws)
+const mkdirp = (dir) => { if (fs.existsSync(dir)) return; mkdirp(path.dirname(dir)); fs.mkdirSync(dir); };
+mkdirp(out);
 
 let frame = 0;
 const hu = headUnit(stage, {

@@ -37,7 +37,11 @@ function ensureRawFile(file) {
         return raw;
     } catch (e) {
         raw = path.join(require('os').tmpdir(), 'mgu_' + base + '.raw');
-        if (!fs.existsSync(raw)) fs.writeFileSync(raw, zlib.gunzipSync(fs.readFileSync(file)));
+        if (!fs.existsSync(raw)) {
+            // to a temp file, then renamed: a cut-short .raw would be taken as the map at the next start
+            fs.writeFileSync(raw + '.tmp', zlib.gunzipSync(fs.readFileSync(file)));
+            fs.renameSync(raw + '.tmp', raw);
+        }
         return raw;
     }
 }
