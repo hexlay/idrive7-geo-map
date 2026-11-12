@@ -11,14 +11,20 @@
    .\recon.ps1 cluster  -Key <...>     the cluster on its map view (the BMW map projected there: blank in Georgia is
                                        fine), the central screen on the home screen as in base
    .\recon.ps1 carplay  -Key <...>     2021+ firmware only: CarPlay guiding, its map in the cluster, the HUD on
+   .\recon.ps1 camera   -Key <...>     the camera view on the screen (parked, no gear engaged: the console's camera /
+                                       PDC button): which surface is the camera's, against base (yield_surfaces)
    .\recon.ps1 clean    -Key <...>     removes /var/tmp/nav-recon from the unit (the reports are on the PC)
    options: -Sniff 30 (s of network capture, 0: none), -Sample 10 (s of CPU), -Out <folder> (default: ..\..\captures)
+
+ The very first run on a car: base with -Sniff 0 (the capture is the one part that costs the unit something for every
+ packet it carries), then base again with the capture. camera needs no capture: -Sniff 0.
+ Nothing is copied or run with less than 300 MB of room in /var/tmp or less than 512 MB of memory available.
 
  The reports hold the car's signal catalog and, with -Sniff, network traffic that can carry its position: they go
  to captures\ (kept out of git). Blocked script? powershell -ExecutionPolicy Bypass -File .\recon.ps1 check -Key ...
 #>
 param(
-    [Parameter(Position = 0)][ValidateSet('check', 'base', 'stocknav', 'cluster', 'carplay', 'clean')][string]$Cmd = 'check',
+    [Parameter(Position = 0)][ValidateSet('check', 'base', 'stocknav', 'cluster', 'carplay', 'camera', 'clean')][string]$Cmd = 'check',
     [Parameter(Mandatory = $true)][string]$Key,
     [string]$Ip = '169.254.36.47',
     [int]$Port = 22,
@@ -70,8 +76,10 @@ Remote 'echo unit: $(hostname 2>/dev/null) $(uname -r 2>/dev/null), up $(cut -d.
 if ($Cmd -eq 'check') { Write-Host 'check: connected; nothing copied or run.'; exit 0 }
 if ($Cmd -eq 'clean') { Remote "rm -rf $remote && echo 'removed $remote'"; exit 0 }
 
-# room for a report: the catalog copy, the capture (capped at ~40 MB), the archive of it (nav-recon.sh checks again)
+# room for a report: the catalog copy, the capture (capped at ~40 MB), the archive of it; and memory, as /var/tmp may
+# be kept in memory (nav-recon.sh checks both again). A number that cannot be read stops it too.
 Remote "free=`$(df -m /var/tmp | awk 'NR==2 {print `$4}'); [ `$free -ge 300 ] || { echo only `$free MB in /var/tmp - stopping, needs 300; exit 3; }"
+Remote "mem=`$(awk '/^MemAvailable:/ {print int(`$2 / 1024)}' /proc/meminfo); [ `$mem -ge 512 ] || { echo only `$mem MB of memory available - stopping, needs 512; exit 3; }"
 
 # the kit: nav-recon.sh and ivi-list, with their checksums, unpacked in its own folder
 $kit = Join-Path ([System.IO.Path]::GetTempPath()) ('nav-recon-kit-' + [guid]::NewGuid().ToString('N') + '.tar')

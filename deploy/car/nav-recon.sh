@@ -32,6 +32,13 @@
 # Learn BMW map, with mgu-render's nav_watch); none: the HMI draws the map itself, and the SOME/IP flow that
 # changes is the one for app.json config.stockNav (iface, field, match).
 #
+# The camera's surface, so Navigation is never over it (mgu-render.conf yield_surfaces: 0x197, 0x198, 0x19d, 0x19f are
+# the ids it yields to, not yet seen on every car). Parked, handbrake on, no gear engaged:
+#   1. LABEL=base sh nav-recon.sh               the home screen
+#   2. LABEL=camera sh nav-recon.sh             the camera view on the screen, opened with the console's camera / PDC button
+#   node kit/tools/nav-recon-diff.js nav-recon-base-<time> nav-recon-camera-<time>
+# The surface that turns visible with a size is the camera's: its id must be one of yield_surfaces (else add it there).
+#
 # Collects, without changing anything on the unit:
 #   1. SOME/IP: every interface in /etc/oap/someip/someip-interfaces.json about positioning,
 #      GNSS / GPS, navigation guidance, the head-up display, the instrument cluster (KombiIF,
@@ -80,8 +87,14 @@ P=$PARENT; while [ ! -d "$P" ] && [ "$P" != / ]; do P=$(dirname "$P"); done
 FREE_MB=$(df -m "$P" 2>/dev/null | awk 'NR == 2 {print $4}')
 case "$FREE_MB" in ''|*[!0-9]*) echo "nav-recon: cannot tell the free space at $PARENT: stopping" >&2; exit 1 ;; esac
 [ "$FREE_MB" -ge 300 ] || { echo "nav-recon: only $FREE_MB MB free at $PARENT (needs 300): stopping, nothing written" >&2; exit 1; }
-# free memory (kB): the catalog's parse is skipped unless the unit has plenty (it never competes with the HMI for it)
+# Memory: where the report goes may be kept in memory (a tmpfs: /var/tmp is one on some units), and then the catalog's
+# copy, the capture and the archive of them are memory the unit loses while the report is there. So nothing is written
+# with less than MIN_MEM_MB (512) available, wherever the report goes; the catalog's parse wants 1 GB on top (below).
+MIN_MEM_MB=${MIN_MEM_MB:-512}
 MEM_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null)
+case "$MIN_MEM_MB" in ''|*[!0-9]*) echo "nav-recon: MIN_MEM_MB: a number of MB" >&2; exit 1 ;; esac
+case "$MEM_KB" in ''|*[!0-9]*) echo "nav-recon: cannot tell the memory available (/proc/meminfo MemAvailable): stopping, nothing written" >&2; exit 1 ;; esac
+[ "$MEM_KB" -ge $((MIN_MEM_MB * 1024)) ] || { echo "nav-recon: only $((MEM_KB / 1024)) MB of memory available (needs $MIN_MEM_MB): stopping, nothing written" >&2; exit 1; }
 
 mkdir -p "$OUT" || { echo "nav-recon: cannot write $OUT" >&2; exit 1; }
 say() { echo "[nav-recon] $*"; echo "$*" >> "$OUT/summary.txt"; }

@@ -12,6 +12,8 @@
  *   LABEL=base / LABEL=carplay   2021+ firmware: where CarPlay's cluster map and HUD arrows go (CarPlay guiding)
  *   LABEL=base / LABEL=stocknav  the stock BMW map's surface or SOME/IP state (the home screen against the BMW map
  *                                opened from the left menu bar): for osm_nav's app.json config.stockNav
+ *   LABEL=base / LABEL=camera    the camera's surface (the camera view opened with the console's button, parked): its
+ *                                id must be one of mgu-render.conf yield_surfaces
  * Compares:
  *   surfaces   ivi-list.txt: surfaces and layers that appear, go, or change visibility / size / place
  *   processes  processes.txt and cpu.txt: new processes, and the ones much busier
@@ -249,6 +251,9 @@ function report(dirA, dirB) {
         '  stocknav: a surface that turns visible at full size (w >= 800, h >= 400) with the BMW map open: its id and',
         '    process go to osm_nav app.json config.stockNav (surfaceId, proc). None: the HMI draws the map itself; a',
         '    SOME/IP flow that appears with it is config.stockNav iface / field.',
+        '  camera: the surface that turns visible with a size while the camera view is on. Its id must be one of the',
+        '    renderer\'s yield_surfaces (mgu-render.conf: 0x197, 0x198, 0x19d, 0x19f); another id: add it there before',
+        '    any app is shown on this car, or its picture could be drawn over the camera.',
         'Send both reports and this output back for the next step.');
     return lines.join('\n');
 }

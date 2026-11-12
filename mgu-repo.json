@@ -8,7 +8,7 @@
       "ID7"
     ],
     "requires": {
-      "idrive7-renderd": "2.1.7",
+      "idrive7-renderd": "2.1.11",
       "mgu-inputgate": "1.0.0"
     },
     "build": {

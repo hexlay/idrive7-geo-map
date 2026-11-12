@@ -214,6 +214,22 @@ class Display {
         if (this.grabbing) gpu.grab(true);
     }
 
+    /**
+     * standDown(on): the app gives the screen back for a while without leaving it (osm_nav while the car reverses).
+     * As when an HMI popup covers the screen: the renderer hides our picture, the controller goes back to the HMI
+     * (the renderer holds it only for a shown app; it is not asked for either), and the HMI's own page shows, with
+     * whatever the HMI puts over it (the camera). Off: shown again as after any cover.
+     */
+    standDown(on) {
+        on = !!on;
+        if (!!this.stoodDown === on || !this.screen) return;
+        this.stoodDown = on;
+        this.log.info('display: ' + (on ? 'standing down: the picture and the controller go back to the HMI' : 'standing down is over'));
+        this._syncVisible();
+        this._lost();
+        this._grab();
+    }
+
     /** the iDrive controller to this app alone while on (GPU renderer + mgu-inputgate.so needed) */
     grab(on) {
         this.grabbing = !!on;
@@ -229,7 +245,7 @@ class Display {
      */
     _grab() {
         if (!this.gpu) return;
-        const want = this.grabbing || (this.own() && !process.env.MGU_NO_GRAB);
+        const want = !this.stoodDown && (this.grabbing || (this.own() && !process.env.MGU_NO_GRAB));
         if (want && this.gpu.native && this.gpu.info && !this.gpu.info.controller && !this.grabNoted) {
             this.grabNoted = true;
             this.log.info('display: the renderer has no controller for us yet (its event socket taken, or no gate): asked anyway');
@@ -719,6 +735,7 @@ class Display {
 
     /** the screen is up and not covered by an HMI popup */
     _shown() {
+        if (this.stoodDown) return false;
         // the HMI's settings screen over ours (no drawn settings: another renderer, software): it shows, not our picture
         return this.ui.isVisible(this.screen.name) && !this.ui.isVisible('SETTINGS') && (!this.ui.hasFocus || this.ui.hasFocus(this.screen.name));
     }

@@ -53,10 +53,12 @@ class StockNavFollower {
         return true;
     }
     _shownBig(r) { return !!(r && r.vis && r.w >= this.o.minW && r.h >= this.o.minH); }
-    _yieldShown() {
+    /** A yield surface (reversing camera, video) is shown now: nothing opens Navigation then (main.js asks too). */
+    yieldShown() {
         for (const r of this.surfaces.values()) if (r.yield && r.vis && r.w > 0 && r.h > 0) return true;
         return false;
     }
+    _yieldShown() { return this.yieldShown(); }
 
     /** Navigation came to the screen or left it. Leaving disarms (BACK lands on the stock map underneath). */
     appVisible(v, now) {

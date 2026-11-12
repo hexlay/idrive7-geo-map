@@ -239,6 +239,63 @@ assert.strictEqual(fl3.learnDone().error, 'vague', 'two full-size screens of dif
 fl3.learn(0);
 fl3.tick(25000);
 assert(fl3.learning.result && fl3.learning.result.error === 'none', 'learning times out after 20 s');
+
+// ---- guard.js: the keyboard while the car moves, and the car in reverse (from the car's own signals) ----
+const GD = require(path.join(APP, 'guard'));
+assert.strictEqual(GD.keyboardLocked(null, null), false, 'no position, no speed ever read (a bench): open');
+assert.strictEqual(GD.keyboardLocked(null, 50), true, 'no position, the car at 50 km/h: locked (1.0.2 left it open)');
+assert.strictEqual(GD.keyboardLocked(null, 5), false, 'no position, walking pace: open');
+assert.strictEqual(GD.keyboardLocked({ source: 'dr', speed: 40 }, null), true, 'a fix that moves: locked');
+assert.strictEqual(GD.keyboardLocked({ source: 'demo', speed: 40 }, 0), false, 'the demo drive in a parked car: open');
+assert.strictEqual(GD.keyboardLocked({ source: 'demo', speed: 40 }, 60), true, 'the demo drive chosen in a car that drives: locked');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 'R' }), true, 'gear R by name');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 1, statusActualStageDrive: 2 }), true, 'gear and selector R by wire number');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 'N_OR_P', statusActualStageDrive: 'R' }), true, 'the selector in R before the gear is');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 'G3', statusActualStageDrive: 'D' }), false, 'third gear');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 2, statusActualStageDrive: 1 }), false, 'park by wire number');
+assert.strictEqual(GD.gearboxReverse({}), undefined, 'no gear in it: says nothing');
+assert.strictEqual(GD.gearboxReverse({ statusActualGearDrive: 'SNA', statusActualStageDrive: 15 }), undefined, 'invalid values say nothing');
+assert.strictEqual(GD.selectionReverse({ statusGearSelectionDrive: 'R' }), true, 'selection R by name');
+assert.strictEqual(GD.selectionReverse({ statusGearSelectionDrive: 2 }), true, 'selection R by wire number');
+assert.strictEqual(GD.selectionReverse({ statusGearSelectionDrive: '_3' }), false, 'selection: third gear');
+assert.strictEqual(GD.selectionReverse({ statusGearSelectionDrive: 3 }), false, 'selection: park');
+assert.strictEqual(GD.selectionReverse({ statusGearSelectionDrive: 15 }), undefined, 'selection: invalid says nothing');
+assert.strictEqual(GD.selectionReverse(null), undefined, 'no value says nothing');
+let dg = new GD.DriveGuard();
+assert(!dg.reversing() && !dg.known(), 'no gear ever told: not reversing');
+assert.strictEqual(dg.gearbox({}, 0), false, 'a value that says nothing changes nothing');
+assert(!dg.known(), 'and is not a gear told');
+assert.strictEqual(dg.gearbox({ statusActualStageDrive: 'R' }, 0), true, 'into reverse: changed');
+assert(dg.reversing() && dg.known(), 'reversing');
+assert.strictEqual(dg.selection({ statusGearSelectionDrive: 'R' }, 10), false, 'the other field says so too: no change');
+assert.strictEqual(dg.gearbox({ statusActualGearDrive: 'N_OR_P', statusActualStageDrive: 'N' }, 1000), false, 'one field out of reverse, the other still in it');
+assert(dg.reversing(), 'still reversing while a fresh field says so');
+assert.strictEqual(dg.selection({ statusGearSelectionDrive: 'N' }, 1100), true, 'both out of reverse: changed');
+assert(!dg.reversing(), 'not reversing');
+dg = new GD.DriveGuard();
+dg.gearbox({ statusActualStageDrive: 'R' }, 0);
+assert.strictEqual(dg.selection({ statusGearSelectionDrive: '_1' }, 5000), true, 'a field stuck on R for 5 s while the other says first gear: dropped');
+assert(!dg.reversing(), 'a stuck field does not keep Navigation off the screen');
+// the car's own speed, whatever the position; and no map opened: nothing throws (an exit would have MainApp remove the app)
+const pos2 = new Position(ctx, { pack, router, packs: () => [pack], route: () => null });
+assert.strictEqual(pos2.carSpeed(), null, 'no speed read yet');
+pos2.live.speed = 42;
+assert.strictEqual(pos2.carSpeed(), 42, 'the last speed read');
+pos2.car = { live: { speed: 0 } };
+assert.strictEqual(pos2.carSpeed(), 0, "the kit's live value first (there also while its demo feed runs)");
+const noMap = new Position(ctx, { pack: null, router: null, packs: () => [], route: () => null });
+noMap.saved = { x: 1, y: 2, heading: 0 };
+noMap.last = Date.now();
+assert.doesNotThrow(() => noMap._tick(), 'no map opened: the position tick does nothing');
+assert.strictEqual(noMap.setHere(1, 2), false, 'no map opened: no place to set');
+// the camera's surface shown: asked by main.js for every way Navigation opens (the NAV button too)
+const flY = new SN.StockNavFollower({ surfaceId: 4100 });
+assert.strictEqual(flY.yieldShown(), false, 'no camera surface seen');
+flY.surface(line(0, 0x197, 1, 1920, 720, 'y', 'dasvideo'), 0);
+assert.strictEqual(flY.yieldShown(), true, 'the camera shown');
+flY.surface(line(1, 0x197, 1, 0, 0, 'y', 'dasvideo'), 1);
+assert.strictEqual(flY.yieldShown(), false, 'visible at 0x0 shows nothing: not the camera on the screen');
+
 pack.close && pack.close();
 console.log('osm_nav: all checks passed (Tbilisi - Batumi ' + Math.round(far.length / 1000) + ' km in ' + far.searchMs + ' ms; '
     + along.length + ' of ' + stations.length + ' fuel stations along it in ' + alongMs + ' ms, stop at ' + Math.round(stop.s / 1000) + ' km)');

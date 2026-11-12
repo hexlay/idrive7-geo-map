@@ -33,6 +33,7 @@ const { Position, TOUR } = require('./gps');
 const { Search, CATEGORIES, kindName, KIND } = require('./search');
 const navkey = require('./navkey');
 const { StockNavFollower, parseSurface } = require('./stocknav');
+const { DriveGuard, keyboardLocked } = require('./guard');
 const FU = require('./fuel');
 const H = require('./hud');
 
@@ -551,7 +552,8 @@ mgu.run({
             const k = kOf(cv), sz = (n) => Math.round(n * k), L = ulang() === 'ka';
             const bottom = PH + (cv.extra || 0), top = TOP + sz(6);
             cv.fillRect(0, TOP, W, bottom - TOP, '#0b0e13');
-            const moving = fix && fix.source !== 'demo' && fix.speed > 8;
+            // the car's own speed too: with no position (no fix) the keyboard must still lock (guard.js)
+            const moving = keyboardLocked(fix, pos.carSpeed());
             const kw = Math.round(W * 0.55), lx = sz(12);
             // the query
             const qh = sz(52);
@@ -895,6 +897,17 @@ mgu.run({
         async function render() {
             const now = Date.now(), dt = Math.min(0.25, (now - S.lastFrame) / 1000);
             S.lastFrame = now;
+            if (standing()) {
+                // reversing: the picture and the controller are the HMI's (display.standDown). One plain frame for the
+                // HMI's own page, then nothing is drawn or sent until the car is out of reverse
+                if (S.stoodFrame) return;
+                S.stoodFrame = true;
+                const sc = ctx.canvas(W, PH).clear('#0b0e13');
+                sc.text(ulang() === 'ka' ? 'უკუსვლა: ნავიგაცია შემდეგ დაბრუნდება' : 'Reversing: Navigation comes back afterwards', W / 2, 280, 22, '#ffffff', { literal: true, align: 'center' });
+                await ui.image('MAIN_GFX', sc);
+                return;
+            }
+            S.stoodFrame = false;
             const t = ctx.theme();
             const cv = ctx.canvas(W, PH).clear('#0b0e13');
             const fix = pos.fix();
@@ -950,7 +963,42 @@ mgu.run({
          * the FrontCCU button field over SOME/IP. Learning and matching: navkey.js.
          */
         let navSrv = null, navSeen = 0, lastOpen = 0, learnTimer = null, lastShownAt = 0;
+        /*
+         * Never over the reversing camera, by two things that do not depend on each other: the car's own gear
+         * (guard.js; no surface id needed) and the renderer's camera surfaces (yield_surfaces, told on the surface
+         * feed). While either says so nothing opens Navigation, the NAV button and "learned" included (up to 1.0.2
+         * only the stock-map follower asked, and only the surfaces). In reverse Navigation also stands down where it
+         * is shown: the picture and the controller go back to the HMI, which then shows its camera as without us.
+         * app.json config.reverseGuard false: the gear is not asked (the surfaces still are).
+         */
+        const guard = new DriveGuard();
+        const reverseGuard = !(ctx.spec.config && ctx.spec.config.reverseGuard === false);
+        const standing = () => reverseGuard && guard.reversing();
+        const openBlocked = () => (standing() ? 'the car is in reverse' : follower.yieldShown() ? 'the camera is shown' : '');
+        let gearSub = null, gearSaid = false;
+        const onGear = (changed) => {
+            if (!gearSaid) { gearSaid = true; log.info('reverse guard: the car tells its gear' + (guard.reversing() ? ' (reverse now)' : '')); }
+            if (!changed) return;
+            const r = standing();
+            log.info(r ? 'reverse: Navigation stands down (picture and controller back to the HMI)' : 'out of reverse: Navigation shows again');
+            if (ctx.display && ctx.display.standDown) ctx.display.standDown(r);
+            kick();
+        };
+        if (reverseGuard && ctx.signals && ctx.signals.watch) {
+            // on for as long as the app runs (a gear change is one event): the NAV button and the stock-map follower
+            // ask while Navigation is in the background, where the position's signals are off
+            ctx.signals.watch('de.bmw.infrastructure.VehicleInformation', '1', {
+                statusGearboxDrive: (v) => onGear(guard.gearbox(v, Date.now())),
+                DataPowerTrain2: (v) => onGear(guard.selection(v, Date.now())),
+            }, log).then((s) => {
+                if (cleanedUp) { try { s.shutdown(); } catch (e) { /* ignore */ } return; }
+                gearSub = s;
+                log.info('reverse guard: VehicleInformation ' + (s.error ? 'error: ' + s.error + ' (no gear: the camera surfaces alone guard)' : 'subscribed'));
+            }).catch((e) => log.warn('reverse guard: ' + e));
+        }
         const openSelf = (tries, askedAt) => {
+            const why = openBlocked();
+            if (why) { log.info('nav button: not opening Navigation: ' + why); return; }
             try {
                 const desc = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'rhmiData', 'application.json'), 'utf8'));
                 const ep = desc.application && desc.application.entryPoints && desc.application.entryPoints[0];
@@ -967,6 +1015,8 @@ mgu.run({
             const now = Date.now();
             if (now - lastOpen < 1500 || ui.isVisible('MAIN')) return;
             lastOpen = now;
+            const blocked = openBlocked();
+            if (blocked) { log.info(why + ': not opening Navigation: ' + blocked); return; }
             log.info(why + ': opening Navigation over the stock screen');
             page = 0; S.sel = null;
             setTimeout(() => openSelf(1, now), delay);
@@ -1125,6 +1175,7 @@ mgu.run({
             clearInterval(memTimer);
             try { track(false); } catch (e) {}
             try { if (navSrv) navSrv.close(); } catch (e) {}
+            try { if (gearSub) gearSub.shutdown(); } catch (e) {}
             clearInterval(snTimer);
             try { packs.forEach((p) => p && p.close && p.close()); } catch (e) {}
         };
@@ -1203,7 +1254,7 @@ mgu.run({
         ui.onVisible((name, v) => {
             if (name !== 'MAIN') return;
             follower.appVisible(v, Date.now());
-            if (v) lastShownAt = Date.now();
+            if (v) { lastShownAt = Date.now(); S.stoodFrame = false; }      // the HMI builds its page afresh
             if (v) { track(true); pos._tick(); kick(); }
             else if (!S.route && !(ctx.widget && ctx.widget.active())) track(false);          // guidance / widget keeps track of the car off screen
         });

@@ -2,7 +2,7 @@
   "id": "osm_nav",
   "title": "Navigation",
   "description": "Offline OpenStreetMap navigation for Georgia (Georgian and English) in place of the BMW map: GPU map at 60 fps, turn-by-turn guidance, speed limits, and the console's NAV button",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "vendor": "custom",
   "loggingId": "OANV",
   "iconGlyph": "nav",
@@ -312,6 +312,8 @@
   "config": {
     "comment": "positioning: the car's own GNSS / navigation position, when known for this firmware (run deploy/car/nav-recon.sh on the car to find it). Each entry: { iface, instance, field, lat, lon, heading, speed (dotted paths into the field's value), scale: { lat, lon, heading, speed } (multipliers to degrees / km/h) }. Add the interface to \"signals\" too, with \"_optional\". Empty: speed and turn rate along the roads (dead reckoning) from the last position or one set on the map.",
     "positioning": [],
+    "reverseGuardComment": "reverseGuard: while the car's gear selector is in reverse (VehicleInformation statusGearboxDrive / DataPowerTrain2, read only) nothing opens Navigation, and a shown Navigation gives its picture and the controller back to the HMI, which shows its camera as without the app. It does not depend on the camera's surface ids (mgu-render.conf yield_surfaces), which are still asked as well. false: the gear is not asked.",
+    "reverseGuard": true,
     "navButtonComment": "navButton: what the console's NAV button sends, so pressing it opens this app on top of the stock screen. The HMI always gets the button too (nothing is blocked): with this app not running, NAV works as stock. Two sources: the controller gate's read-only button feed (mgu-inputgate.so built from kit/renderd/inputgate, and /var/opt/mgu-inputgate/buttons, which the installer creates), or a SOME/IP field: iface + field from deploy/car/nav-recon.sh (add it to signals with _optional). match: byte pattern in hex, xx for a byte that changes (a counter), e.g. \"xx 01 a4 xx\"; the Route page can learn it (press NAV three times). Empty: learn on the car.",
     "navButton": {
       "match": "",

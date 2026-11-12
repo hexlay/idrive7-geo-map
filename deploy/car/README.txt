@@ -90,8 +90,16 @@ whole. Nothing outside /var/tmp/nav-recon is written; nothing is stopped.
     .\recon.ps1 check    -Key <...\enrollments\<VIN>\id_rsa>   connect only
     .\recon.ps1 base     -Key <...>   home screen, BMW map closed, CarPlay off
     .\recon.ps1 stocknav -Key <...>   BMW map opened from the left menu bar NAV
-    .\recon.ps1 carplay  -Key <...>   CarPlay guiding, its map in the cluster
+    .\recon.ps1 cluster  -Key <...>   the cluster on its map view, home screen in the centre
+    .\recon.ps1 carplay  -Key <...>   2021+ firmware: CarPlay guiding, its map in the cluster
+    .\recon.ps1 camera   -Key <...>   the camera view on the screen (parked, no gear engaged:
+                                      the console's camera / PDC button), with -Sniff 0
     .\recon.ps1 clean    -Key <...>   remove /var/tmp/nav-recon from the unit
+The very first run on a car: base with -Sniff 0 (no network capture: the one
+part that costs the unit something for every packet), then base again with it.
+camera against base (node kit/tools/nav-recon-diff.js <base> <camera>) shows the
+camera's surface: its id must be in the renderer's yield_surfaces
+(kit/renderd/mgu-render.conf), or Navigation could be drawn over the camera.
 ivi-list is built from kit/renderd/tools/ivi-list.c (make -C kit/renderd
 build/ivi-list, in the Ubuntu 18.04 image). It is read only by construction:
 per surface it asks for a handle, its owner, and drops the handle keeping the
@@ -99,6 +107,7 @@ surface - nothing else (make in-test-ivi-list checks every request it sends;
 the build refuses any call that changes the compositor). recon.ps1 sends only
 that exact binary (its SHA-256 is pinned). Never copy ivi-probe to a car: its
 list asks the compositor to "create" existing layers.
-nav-recon.sh runs at the lowest CPU and disk priority, needs 300 MB free, caps
+nav-recon.sh runs at the lowest CPU and disk priority, needs 300 MB free and
+512 MB of memory available (the report's folder may be kept in memory), caps
 the network capture at 150000 packets (~40 MB), opens no sound device, runs
 no other program on the HMI binary, and only lists the stock map's files.

@@ -137,7 +137,8 @@ class Position {
         this.lastMoveAt = Date.now();
         if (Car && !this.car && this.ctx.signals && this.ctx.signals.watch) {
             try {
-                this.car = new Car(this.ctx, ['speed', 'accel', 'gear']);
+                // no gear here: main.js keeps the one gear subscription (guard.js), on also while this is stopped
+                this.car = new Car(this.ctx, ['speed', 'accel']);
                 this.car.onSample((d) => {
                     if (d.demo) return;
                     this.carSeen = true;
@@ -219,7 +220,8 @@ class Position {
 
     /** "I'm here": dead reckoning starts from this point (snapped to a road). */
     setHere(x, y, heading) {
-        const s = this.nav.router.snap(x, y, heading == null ? null : heading, 300);
+        if (!this.nav.pack) return false;           // no map opened
+        const s =this.nav.router.snap(x, y, heading == null ? null : heading, 300);
         if (!s) return false;
         this.dr = { edge: s.edge, t: s.t, heading: s.bearing, at: Date.now() };
         this.cur = this._onEdge(s.edge, s.t, 0, 'dr');
@@ -229,8 +231,20 @@ class Position {
 
     onFix(fn) { this.listeners.push(fn); }
     fix() { return this.cur; }
+    /**
+     * The car's own speed (km/h), whatever the position and the demo drive: null while none was ever read (a bench,
+     * the PC preview). A signal gone quiet keeps its last value (quiet after driving counts as moving, as kit/parked.js).
+     */
+    carSpeed() {
+        const c = this.car && this.car.live;        // the kit's live values: there also while its demo feed runs
+        if (c && typeof c.speed === 'number' && isFinite(c.speed)) return c.speed;
+        return typeof this.live.speed === 'number' && isFinite(this.live.speed) ? this.live.speed : null;
+    }
 
     _tick() {
+        // no map opened (a package without its map, a map that cannot be read): nothing to match the car to. main.js
+        // says so on the screen; here it must not throw (an app that exits twice is removed by MainApp, with its places)
+        if (!this.nav.pack) return;                 // (not nav.router: asking for it builds it)
         const now = Date.now(), dt = Math.min(0.5, (now - this.last) / 1000);
         this.last = now;
         let f = null;
