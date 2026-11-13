@@ -263,6 +263,10 @@ def build_ui(spec, language='en'):
                 label = it[2] if len(it) > 2 else ''
                 if kindi == 'twocol':
                     rows = [{'Text1stCol': {'value': label, 'type': 'Text'}, 'Text2ndCol': {'value': '', 'type': 'Text'}}]
+                elif kindi == 'tworow':
+                    # BMW's two-line list row (title, then a grey line under it): [kind, name, title, 2nd line]
+                    rows = [{'Text1stRow': {'value': hmi_text(label), 'type': 'Text'},
+                             'Text2ndRow': {'value': hmi_text(it[3] if len(it) > 3 else ''), 'type': 'Text'}}]
                 elif kindi in ('graphic',):
                     rows = [{'Graphic': {'value': '', 'type': 'Text'}}]
                 elif kindi == 'laptimer':

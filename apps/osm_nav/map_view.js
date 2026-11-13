@@ -18,31 +18,37 @@
  * classes come in as the map zooms in.
  */
 const { F, groundScale } = require('./mappack');
+const { withAlpha } = require('./kit/canvas');
 
 /* road classes: 0 motorway .. 9 pedestrian; width in metres on the ground, and at least this many px */
 const ROAD_M = [24, 21, 18, 15, 13, 10, 9, 7, 5.5, 4];
 const ROAD_MIN = [3.2, 3, 2.6, 2.1, 1.7, 1.3, 1.2, 1, 0.9, 0.8];
 
+/*
+ * Colours after the BMW map of iDrive 7: night is a deep blue-grey with amber motorways, a dull gold trunk
+ * road and grey streets; day is a light warm grey with orange motorways, yellow trunk roads and white
+ * streets. The route is BMW blue on a dark blue casing, the car a blue arrow with a white edge.
+ */
 const STYLES = {
     night: {
-        bg: '#1d2228', residential: '#21262d', industrial: '#24242a', commercial: '#26232a', water: '#163049', park: '#1b3025',
-        forest: '#18291f', grass: '#1c2f24', cemetery: '#1f2c27', building: '#2a3038', pedestrian: '#262b31', land: '#1d2228',
-        river: '#204264', rail: '#3a4048', border: '#9b5876', region: '#5a4a5a',
-        road: ['#e0973c', '#d2ae55', '#b8c0ca', '#9aa3ad', '#89919b', '#737b85', '#6a727c', '#5c636c', '#535a63', '#474d55'],
-        casing: '#0c0f12', casingMajor: '#3a2410', bridge: '#05070a',
-        route: '#2f8cff', routeCasing: '#0a2856', routePast: '#5a6474', chevron: '#ffffff',
-        text: '#e8ebef', textDim: '#a7afb9', halo: '#11151a', place: '#f4f6f8', suburb: '#9ea7b2',
-        car: '#2f8cff', carRing: '#ffffff',
+        bg: '#18202a', residential: '#1b232d', industrial: '#1e2229', commercial: '#1f2229', water: '#0c2540', park: '#16271f',
+        forest: '#14241c', grass: '#172820', cemetery: '#1a2722', building: '#252e39', pedestrian: '#1f2731', land: '#18202a',
+        river: '#123456', rail: '#36404c', border: '#8c5a7a', region: '#4c4658',
+        road: ['#c98a3f', '#a99359', '#8a96a4', '#7a8593', '#6c7784', '#5b6572', '#535d69', '#4a535e', '#434c56', '#3b434c'],
+        casing: '#0b0f14', casingMajor: '#3b2712', bridge: '#05070a',
+        route: '#2f80ed', routeCasing: '#0a2a5c', routePast: '#4f5966', chevron: '#cfe3ff',
+        text: '#dfe4ea', textDim: '#98a2ae', halo: '#10161d', place: '#f2f4f7', suburb: '#97a1ad',
+        car: '#2f80ed', carLight: '#7fb6ff', carRing: '#ffffff', carGlow: '#2f80ed',
     },
     day: {
-        bg: '#ebe8e1', residential: '#e3dfd6', industrial: '#ddd7d6', commercial: '#e6d9d6', water: '#a6c8e6', park: '#c4deb0',
-        forest: '#b1d29c', grass: '#cbe3b8', cemetery: '#c6d8bf', building: '#d8d0c4', pedestrian: '#e8e3dc', land: '#ebe8e1',
-        river: '#8db8dd', rail: '#a9a39b', border: '#a2507a', region: '#b693a8',
-        road: ['#f0a043', '#f6c55c', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#f7f6f3', '#f5f3ef', '#efebe5'],
-        casing: '#b7afa3', casingMajor: '#c0803d', bridge: '#8f877b',
-        route: '#1a73e8', routeCasing: '#0b3d91', routePast: '#9aa3ad', chevron: '#ffffff',
+        bg: '#ecebe6', residential: '#e5e3dc', industrial: '#dfdbd8', commercial: '#e8dfdb', water: '#a3c9eb', park: '#cde4b8',
+        forest: '#b8d7a2', grass: '#d1e7bf', cemetery: '#cadcc2', building: '#dad4ca', pedestrian: '#ebe7e1', land: '#ecebe6',
+        river: '#8ebbe2', rail: '#aaa59d', border: '#a2507a', region: '#b693a8',
+        road: ['#f4a742', '#f8d56b', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#f9f8f5', '#f6f4f0', '#efece6'],
+        casing: '#bdb6aa', casingMajor: '#c98538', bridge: '#8f877b',
+        route: '#1c69d4', routeCasing: '#0a3a80', routePast: '#9aa3ad', chevron: '#ffffff',
         text: '#2a2e35', textDim: '#5d646d', halo: '#ffffff', place: '#1d2127', suburb: '#56606b',
-        car: '#1a73e8', carRing: '#ffffff',
+        car: '#1c69d4', carLight: '#5aa2ff', carRing: '#ffffff', carGlow: '#1c69d4',
     },
 };
 const AREA_KEY = [null, 'water', 'park', 'forest', 'residential', 'industrial', 'building', 'grass', 'land', 'commercial', 'cemetery', 'pedestrian'];
@@ -50,12 +56,12 @@ const AREA_KEY = [null, 'water', 'park', 'forest', 'residential', 'industrial', 
 const AREA_ORDER = [4, 5, 9, 11, 10, 7, 3, 2, 8, 1, 6];
 const LINE = { 1: 'river', 2: 'river', 3: 'rail', 4: 'border', 5: 'region', 6: 'river', 7: 'rail' };
 
-/* POI kinds (pack_osm.py) */
+/* POI kinds (pack_osm.py): BMW-map style rounded squares in muted category colours */
 const POI = {
-    10: { c: '#2563eb', g: 'fuel' }, 11: { c: '#16a34a', g: 'bolt' }, 12: { c: '#dc2626', g: 'cross' }, 13: { c: '#1d4ed8', g: 'P' },
-    14: { c: '#9333ea', g: 'star' }, 15: { c: '#ea580c', g: 'dot' }, 16: { c: '#0891b2', g: 'H' }, 17: { c: '#059669', g: 'cross' },
-    18: { c: '#1e40af', g: 'dot' }, 19: { c: '#e11d48', g: 'M' }, 20: { c: '#475569', g: 'plane' }, 21: { c: '#c026d3', g: 'bag' },
-    22: { c: '#7c3aed', g: 'dot' }, 23: { c: '#9333ea', g: 'star' }, 24: { c: '#0f766e', g: 'dot' }, 25: { c: '#b45309', g: 'dot' },
+    10: { c: '#2c5f9e', g: 'fuel' }, 11: { c: '#2e8b57', g: 'bolt' }, 12: { c: '#c0392b', g: 'cross' }, 13: { c: '#1c69d4', g: 'P' },
+    14: { c: '#7a5aa8', g: 'star' }, 15: { c: '#b86b2f', g: 'dot' }, 16: { c: '#3c7f95', g: 'H' }, 17: { c: '#2f8a6b', g: 'cross' },
+    18: { c: '#3a5a8c', g: 'dot' }, 19: { c: '#b03a55', g: 'M' }, 20: { c: '#5a6678', g: 'plane' }, 21: { c: '#8e4f9e', g: 'bag' },
+    22: { c: '#6a5a9c', g: 'dot' }, 23: { c: '#7a5aa8', g: 'star' }, 24: { c: '#3b7a72', g: 'dot' }, 25: { c: '#946235', g: 'dot' },
 };
 
 class MapView {
@@ -149,7 +155,7 @@ class MapView {
         this._labels(r, labels, placed, k, lv);
         if (lv === 2 && mpp < 2.6 && opts.poi !== false) this._pois(r, tiles, placed, k, mpp);
         this._places(r, tiles, lv, placed, k, false);
-        if (opts.dest) this._pin(r, opts.dest, k);
+        if (opts.dest) this._pin(r, opts.dest, k, null, true);
         if (opts.pins) opts.pins.forEach((p) => this._pin(r, p, k * 0.8, p.color));
         if (opts.car) this._car(r, opts.car, k);
         r.noclip();
@@ -342,8 +348,8 @@ class MapView {
                 const t = acc / l, cx = px + dx * t, cy = py + dy * t, ux = dx / l, uy = dy / l;
                 if (cx > V.x0 && cx < V.x1 && cy > V.y0 && cy < V.y1) {
                     const bx = cx - ux * cw, by = cy - uy * cw;
-                    r.line(bx - uy * cw, by + ux * cw, cx + ux * cw * 0.4, cy + uy * cw * 0.4, Math.max(1.6, w * 0.16), S.chevron);
-                    r.line(bx + uy * cw, by - ux * cw, cx + ux * cw * 0.4, cy + uy * cw * 0.4, Math.max(1.6, w * 0.16), S.chevron);
+                    r.line(bx - uy * cw, by + ux * cw, cx + ux * cw * 0.4, cy + uy * cw * 0.4, Math.max(1.6, w * 0.16), withAlpha(S.chevron, 0.7));
+                    r.line(bx + uy * cw, by - ux * cw, cx + ux * cw * 0.4, cy + uy * cw * 0.4, Math.max(1.6, w * 0.16), withAlpha(S.chevron, 0.7));
                 }
                 px = cx; py = cy; acc = gap;
                 continue;
@@ -472,10 +478,10 @@ class MapView {
                 // stations), the rest only zoomed right in
                 const minor = p.kind === 15 || p.kind === 25 || p.kind === 24 || p.kind === 22 || p.kind === 16 || p.kind === 17 || p.kind === 18;
                 if (minor && mpp > 0.7) continue;
-                if ((p.kind === 14 || p.kind === 23 || p.kind === 21) && mpp > 1.3) continue;
+                if ((p.kind === 14 || p.kind === 23 || p.kind === 21) && mpp > 0.9) continue;
                 const sx = aff.A * p.x + aff.B * p.y + aff.C, sy = aff.D * p.x + aff.E * p.y + aff.F;
                 if (sx < V.x0 + 20 || sx > V.x1 - 20 || sy < V.y0 + 20 || sy > V.y1 - 20) continue;
-                const rr = 10 * k;
+                const rr = 9 * k;
                 const b = { x0: sx - rr, y0: sy - rr, x1: sx + rr, y1: sy + rr };
                 if (placed.some((q) => b.x0 < q.x1 && b.x1 > q.x0 && b.y0 < q.y1 && b.y1 > q.y0)) continue;
                 poiIcon(r, sx, sy, rr, p.kind);
@@ -485,38 +491,65 @@ class MapView {
         }
     }
 
-    _pin(r, d, k, color) {
+    /** A place pin (a picked place, a fuel stop); the destination (flag: true) is BMW's chequered flag on a pole. */
+    _pin(r, d, k, color, flag) {
         const p = this.toScreen(d.x, d.y, [0, 0]), x = p[0], y = p[1];
         const V = this.view;
         if (x < V.x0 || x > V.x1 || y < V.y0 || y > V.y1) return;
-        const c = color || '#e1001a', s = 15 * k;
+        const s = 15 * k;
+        if (flag) {
+            // a disc on the ground, a pole, and a chequered flag in a white frame
+            r.arc(x, y, 0, 6 * k, 0, 360, '#00000066');
+            r.arc(x, y, 3 * k, 5 * k, 0, 360, '#ffffff');
+            r.line(x, y, x, y - s * 2.6, 2.4 * k, '#ffffff');
+            const fx = x + 1 * k, fy = y - s * 2.6, fw = s * 1.5, fh = s * 1.0, n = 4, q = fw / n;
+            r.fillRect(fx - 1.5 * k, fy - 1.5 * k, fw + 3 * k, fh + 3 * k, '#ffffff');
+            r.fillRect(fx, fy, fw, fh, '#1a1d22');
+            for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) if ((i + j) % 2 === 0) r.fillRect(fx + i * q, fy + j * fh / 3, q, fh / 3, '#ffffff');
+            return;
+        }
+        const c = color || '#1c69d4';
         r.circle(x, y, 5 * k, '#00000066');
-        r.tris([x - s * 0.55, y - s * 1.55, x + s * 0.55, y - s * 1.55, x, y], c);
-        r.circle(x, y - s * 1.7, s * 0.72, c);
-        r.circle(x, y - s * 1.7, s * 0.3, '#ffffff');
+        r.tris([x - s * 0.55, y - s * 1.55, x + s * 0.55, y - s * 1.55, x, y], '#ffffff');
+        r.circle(x, y - s * 1.7, s * 0.8, '#ffffff');
+        r.tris([x - s * 0.42, y - s * 1.55, x + s * 0.42, y - s * 1.55, x, y - s * 0.25], c);
+        r.circle(x, y - s * 1.7, s * 0.64, c);
+        r.circle(x, y - s * 1.7, s * 0.26, '#ffffff');
     }
 
-    /** The car: an arrow in a ring, pointing the way it drives. */
+    /**
+     * The car, as on the BMW map: a blue arrowhead with a white edge, lit on its left half, over a soft blue
+     * disc on the ground, pointing the way it drives.
+     */
     _car(r, car, k) {
         const S = this.S, p = this.toScreen(car.x, car.y, [0, 0]), x = p[0], y = p[1];
         const a = ((car.heading || 0) - this.camera.heading) * Math.PI / 180;
-        const s = 17 * k, sin = Math.sin(a), cos = Math.cos(a);
+        const s = 19 * k, sin = Math.sin(a), cos = Math.cos(a);
         const P = (u, v) => [x + u * cos - v * sin, y + u * sin + v * cos];
-        r.circle(x, y + 2, s * 1.25, '#00000055');
-        r.circle(x, y, s * 1.12, S.carRing);
-        r.circle(x, y, s * 0.98, S.car);
-        // a dart: a long point ahead, short wings behind, a notch between them
-        const t = P(0, -s * 0.78), lft = P(-s * 0.5, s * 0.52), m = P(0, s * 0.2), rgt = P(s * 0.5, s * 0.52);
-        r.tris([t[0], t[1], lft[0], lft[1], m[0], m[1], t[0], t[1], m[0], m[1], rgt[0], rgt[1]], '#ffffff');
+        r.circle(x, y, s * 1.55, withAlpha(S.carGlow, 0.16));
+        r.arc(x, y, s * 1.42, s * 1.55, 0, 360, withAlpha(S.carGlow, 0.32));
+        // the edge: the same arrowhead, a little bigger, in white (its shadow under it)
+        const dart = (sc, dy) => {
+            const t = P(0, -s * 0.95 * sc + dy), l = P(-s * 0.66 * sc, s * 0.7 * sc + dy), m = P(0, s * 0.32 * sc + dy), rt = P(s * 0.66 * sc, s * 0.7 * sc + dy);
+            return [t, l, m, rt];
+        };
+        const sh = dart(1.22, 2.5 * k), e = dart(1.22, 0), d = dart(1, 0);
+        r.tris([sh[0][0], sh[0][1], sh[1][0], sh[1][1], sh[2][0], sh[2][1], sh[0][0], sh[0][1], sh[2][0], sh[2][1], sh[3][0], sh[3][1]], '#00000066');
+        r.tris([e[0][0], e[0][1], e[1][0], e[1][1], e[2][0], e[2][1], e[0][0], e[0][1], e[2][0], e[2][1], e[3][0], e[3][1]], S.carRing);
+        // the left half lit, the right half in the deeper blue: the BMW arrow's ridge
+        r.tris([d[0][0], d[0][1], d[1][0], d[1][1], d[2][0], d[2][1]], S.carLight);
+        r.tris([d[0][0], d[0][1], d[2][0], d[2][1], d[3][0], d[3][1]], S.car);
     }
 }
 
-/** A POI marker: a disc in its colour with a small white glyph. */
+/** A POI marker: a rounded square in its colour with a small white glyph. */
 function poiIcon(r, x, y, rr, kind) {
     const st = POI[kind] || { c: '#64748b', g: 'dot' }, W = '#ffffff';
-    r.circle(x, y + 1, rr + 1.5, '#00000055');
-    r.circle(x, y, rr + 1.2, W);
-    r.circle(x, y, rr, st.c);
+    // a rounded square in the category colour with a thin white edge (the BMW map's POI tiles)
+    const q = rr * 0.28;
+    r.roundRect(x - rr - 1.2, y - rr - 1.2 + 1.5, rr * 2 + 2.4, rr * 2 + 2.4, q + 1.2, '#00000055');
+    r.roundRect(x - rr - 1.2, y - rr - 1.2, rr * 2 + 2.4, rr * 2 + 2.4, q + 1.2, W);
+    r.roundRect(x - rr, y - rr, rr * 2, rr * 2, q, st.c);
     const u = rr / 10;
     switch (st.g) {
     case 'fuel':

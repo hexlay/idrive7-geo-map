@@ -39,6 +39,7 @@ jobs:
           [ -f "$f" ] || curl -sSfL --retry 3 -o "$f" "$url"
           echo "$sha  $f" | sha256sum -c -
       - run: node kit/tools/test_osm_nav.js
+      - run: node kit/tools/test_hudturn.js
       - run: node kit/tools/test_nav_recon_diff.js
       - run: node kit/tools/test_diag_options.js
       - run: node kit/tools/test_zh.js
@@ -58,4 +59,5 @@ jobs:
       - run: node kit/tools/test_diag_options.js
       - run: node kit/tools/test_zh.js
       - run: python3 kit/tools/test_zh.py
+      - run: node kit/tools/test_hudturn.js
       - run: node kit/renderd/test/test_gate_apps.js

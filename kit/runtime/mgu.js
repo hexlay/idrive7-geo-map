@@ -516,7 +516,8 @@ function wireSettings(ctx) {
             const sh = listSheet(settings, null, { version: SPEC.version });
             sh.settings = true;
             sh.onClose = () => refresh();
-            if (d.openSheet(sh)) return null;
+            // app.json "nativeSettings": true: always the HMI's own settings list (BMW's look), never the drawn sheet
+            if (!SPEC.nativeSettings && d.openSheet(sh)) return null;
             return refresh().then(() => ui.open('SETTINGS'));
         });
     }

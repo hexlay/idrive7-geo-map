@@ -8,6 +8,17 @@
  * from the theme colour to red at the dial's limit (redline, max boost, ...).
  */
 const THEMES = {
+    // iDrive 7 (Operating System 7): near-black blue-grey, BMW blue (#1c69d4) for the selection and the
+    // controller's focus, which is a lit blue field (focusFill) as on the HMI's own lists, not only a ring
+    idrive: {
+        name: 'iDrive Blue',
+        bg: '#07090c', panelTop: '#1a2028', panelBottom: '#0c0f13', panelEdge: '#2a323d',
+        tab: '#ffffff', track: '#1c222a', tick: '#4d5866', text: '#ffffff', dim: '#8d97a5',
+        accent: '#1c69d4', accent2: '#5aa2ff', ok: '#1c69d4', warn: '#f5a623', crit: '#e2231a', cold: '#5aa2ff',
+        glow: '#1c69d455', stripes: ['#1c69d4'], oil: '#e2231a', bar: '#1c69d4', hang: '#5aa2ff', sel: '#1c69d4', selText: '#ffffff',
+        marker: '#ffffff', ramp: ['#0d3a7a', '#1c69d4', '#5aa2ff'], hotRamp: ['#0d3a7a', '#1c69d4', '#3d8bff', '#c04cdc', '#e2231a'],
+        focusFill: true,
+    },
     m_red: {
         name: 'M Red',
         bg: '#050506', panelTop: '#17181c', panelBottom: '#0d0d10', panelEdge: '#2a2b31',

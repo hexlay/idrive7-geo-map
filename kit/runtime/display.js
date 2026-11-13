@@ -114,9 +114,12 @@ class Display {
         G.onConfirm(() => { this.lastWords = null; this.tickHandlers.forEach((fn) => fn()); });   // a reset asks / runs out
         const canvasScreens = (spec.screens || []).filter((s) => s.kind === 'canvas');
         this.screen = canvasScreens[0] || null;
+        // the app's native HMI screens (lists, menus) and the HMI's settings screen: while one of them is open
+        // over the drawn screen, the HMI shows it: our picture hides and the controller is the HMI's
+        this.nativeNames = (spec.screens || []).filter((s) => s.kind !== 'canvas').map((s) => s.name).concat(['SETTINGS']);
         if (!this.screen) return;
         this.ui.onVisible((name, v) => {
-            if (name === 'SETTINGS') { this._syncVisible(); if (!v) this._lost(); return; }
+            if (this.nativeNames.indexOf(name) >= 0) { this._syncVisible(); this._grab(); if (!v) this._lost(); return; }
             if (name !== this.screen.name) return;
             if (v) this.barOff = 0;                   // the HMI builds the screen afresh
             if (!v) this.closeSheet();
@@ -245,7 +248,7 @@ class Display {
      */
     _grab() {
         if (!this.gpu) return;
-        const want = !this.stoodDown && (this.grabbing || (this.own() && !process.env.MGU_NO_GRAB));
+        const want = !this.stoodDown && !this.nativeOver() && (this.grabbing || (this.own() && !process.env.MGU_NO_GRAB));
         if (want && this.gpu.native && this.gpu.info && !this.gpu.info.controller && !this.grabNoted) {
             this.grabNoted = true;
             this.log.info('display: the renderer has no controller for us yet (its event socket taken, or no gate): asked anyway');
@@ -734,10 +737,13 @@ class Display {
     }
 
     /** the screen is up and not covered by an HMI popup */
+    /** One of the app's native HMI screens (or the HMI's settings) is open over the drawn screen. */
+    nativeOver() { return (this.nativeNames || []).some((n) => this.ui.isVisible(n)); }
+
     _shown() {
         if (this.stoodDown) return false;
         // the HMI's settings screen over ours (no drawn settings: another renderer, software): it shows, not our picture
-        return this.ui.isVisible(this.screen.name) && !this.ui.isVisible('SETTINGS') && (!this.ui.hasFocus || this.ui.hasFocus(this.screen.name));
+        return this.ui.isVisible(this.screen.name) && !this.nativeOver() && (!this.ui.hasFocus || this.ui.hasFocus(this.screen.name));
     }
 
     _syncVisible() {
@@ -961,6 +967,8 @@ class Display {
         const sb = this.focusKey === 'scroll' && !this.sheet && this.pageScroll;
         if (sb === true) c.strokeRoundRect(hx + 6, geo.headH + 6, W - hx - 12, H - this.barH() - geo.headH - 12, 14, 3, G.withAlpha(t.sel || t.accent, 0.8));
         else if (sb && sb.bar) c.roundRect((sb.bar.x - 2) * k + pl.ox, sb.bar.y * k + pl.oy, (sb.bar.w + 4) * k, sb.bar.h * k, (sb.bar.w / 2 + 2) * k, t.sel || t.accent);
+        // iDrive 7 themes (focusFill): the place the controller is on is lit blue as well as framed
+        if (pt && t.focusFill && !pt.drag) c.roundRect(pt.x * k + pl.ox - 5, pt.y * k + pl.oy - 5, pt.w * k + 10, pt.h * k + 10, (pt.r != null ? pt.r : pt.h / 2) * k + 5, G.withAlpha(t.sel || t.accent, 0.3));
         if (pt) c.strokeRoundRect(pt.x * k + pl.ox - 5, pt.y * k + pl.oy - 5, pt.w * k + 10, pt.h * k + 10, (pt.r != null ? pt.r : pt.h / 2) * k + 5, 3, t.sel || t.accent);
         // the strip's bottom edge continues under the see-through part
         c.fillRect(sx, 0, W - sx, geo.headH, HMI.headBg);

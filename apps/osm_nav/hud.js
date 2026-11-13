@@ -1,8 +1,9 @@
 'use strict';
 /**
- * hud.js - what is drawn over the map: the maneuver card (arrow, distance, street), the speed limit
- * sign (BMW Speed Limit Info style: white disc, red ring), the trip bar (arrival time, distance and
- * time left, speed) and the round map buttons. Node 8; draws on a record.js Recorder.
+ * hud.js - what is drawn over the map, in the look of iDrive 7's BMW map: the maneuver arrow and BMW's
+ * distance bar, the speed limit sign (BMW Speed Limit Info style: white disc, red ring), the map tiles
+ * (compass, zoom, back to the car), line glyphs, and the HMI's panels (ID7 colours). Node 8; draws on a
+ * record.js Recorder.
  */
 const { withAlpha } = require('./kit/canvas');
 
@@ -132,27 +133,116 @@ function sli(r, cx, cy, rr, limit, over, imperial) {
     r.text(t, cx, cy + sz * 0.36, sz, '#111111', { literal: true, font: 'bold', align: 'center' });
 }
 
-/** A round map button (zoom, compass ...) */
-function roundButton(r, x, y, rr, t, glyph, dim) {
-    r.circle(x, y + 2, rr + 2, '#00000055');
-    r.circle(x, y, rr, withAlpha('#14181e', 0.92));
-    r.arc(x, y, rr - 1.5, rr, 0, 360, withAlpha('#ffffff', 0.22));
+/*
+ * iDrive 7 look. The HMI's own panels: a dark blue-grey field, lighter at the top, a thin light line along its
+ * top edge and a soft shadow; small corners. BMW blue (#1c69d4) for what is selected or primary.
+ */
+const ID7 = {
+    blue: '#1c69d4', blueLight: '#5aa2ff', blueDeep: '#1254b0', text: '#ffffff', text2: '#a3adb9', text3: '#6d7783',
+    line: '#ffffff17', amber: '#f5a623', red: '#e2231a', green: '#3fb950',
+    panelTop: '#1c232c', panelBottom: '#0d1116', key: '#232a33', keyTop: '#2c343e', keyDark: '#161b21',
+};
+
+/** An iDrive 7 panel at x, y (w x h), corner radius rad. alpha: how solid it is over the map (default 0.94). */
+function panel(r, x, y, w, h, rad, alpha) {
+    const a = alpha == null ? 0.94 : alpha;
+    r.roundRect(x, y + 3, w, h, rad, '#00000059');
+    r.card(x, y, w, h, rad, [[0, withAlpha(ID7.panelTop, a)], [1, withAlpha(ID7.panelBottom, a)]]);
+    r.fillRect(x + rad, y, w - rad * 2, 1, withAlpha('#ffffff', 0.13));
+    r.strokeRoundRect(x, y, w, h, rad, 1, withAlpha('#ffffff', 0.07));
+}
+
+/**
+ * BMW's distance bar beside the maneuver arrow: it empties downwards as the turn comes closer (full at
+ * `span` metres or more, empty at the turn), as in the cluster and the Head-Up Display.
+ */
+function distBar(r, x, y, w, h, dist, span) {
+    const f = Math.max(0, Math.min(1, dist / (span || 300)));
+    r.roundRect(x, y, w, h, w / 2, withAlpha('#ffffff', 0.12));
+    const fh = Math.max(w, h * f);
+    r.roundRect(x, y + h - fh, w, fh, w / 2, f > 0.02 ? '#ffffff' : ID7.blueLight);
+}
+
+/** Small white line glyphs for lists and buttons: home, work, fav, recent, flag, search, back, close. */
+function glyph(r, x, y, s, name, col) {
+    const c = col || '#ffffff', u = s / 10, lw = Math.max(1.4, 1.5 * u);
+    switch (name) {
+    case 'home':
+        r.tris([x, y - 6 * u, x - 6.5 * u, y - 0.5 * u, x + 6.5 * u, y - 0.5 * u], c);
+        r.fillRect(x - 4.5 * u, y - 0.6 * u, 9 * u, 6.6 * u, c);
+        r.fillRect(x - 1.4 * u, y + 2 * u, 2.8 * u, 4 * u, '#00000088');
+        break;
+    case 'work':
+        r.roundRect(x - 6 * u, y - 2.5 * u, 12 * u, 8.5 * u, 1.2 * u, c);
+        r.strokeRoundRect(x - 2.6 * u, y - 5.5 * u, 5.2 * u, 3.6 * u, 1 * u, lw, c);
+        r.fillRect(x - 6 * u, y + 0.6 * u, 12 * u, 0.9 * u, '#00000088');
+        break;
+    case 'fav': {
+        const pts = [];
+        for (let i = 0; i < 5; i++) {
+            const a0 = -Math.PI / 2 + i * 2 * Math.PI / 5, a1 = a0 + Math.PI / 5, a2 = a0 - Math.PI / 5;
+            pts.push(x, y, x + Math.cos(a0) * 6.5 * u, y + Math.sin(a0) * 6.5 * u, x + Math.cos(a1) * 2.8 * u, y + Math.sin(a1) * 2.8 * u);
+            pts.push(x, y, x + Math.cos(a2) * 2.8 * u, y + Math.sin(a2) * 2.8 * u, x + Math.cos(a0) * 6.5 * u, y + Math.sin(a0) * 6.5 * u);
+        }
+        r.tris(pts, c);
+        break;
+    }
+    case 'recent':
+        r.arc(x, y, 5.2 * u, 5.2 * u + lw, 0, 360, c);
+        r.line(x, y, x, y - 3.6 * u, lw, c);
+        r.line(x, y, x + 2.8 * u, y + 1.4 * u, lw, c);
+        break;
+    case 'flag': {
+        r.line(x - 4.5 * u, y - 6 * u, x - 4.5 * u, y + 6.5 * u, lw, c);
+        const fx = x - 4 * u, fy = y - 6 * u, fw = 10 * u, fh = 6.6 * u, n = 4, q = fw / n;
+        r.strokeRoundRect(fx, fy, fw, fh, 0, Math.max(1, u), c);
+        for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) if ((i + j) % 2 === 0) r.fillRect(fx + i * q, fy + j * fh / 3, q, fh / 3, c);
+        break;
+    }
+    case 'search':
+        r.arc(x - 1.2 * u, y - 1.2 * u, 3.8 * u, 3.8 * u + lw, 0, 360, c);
+        r.line(x + 2 * u, y + 2 * u, x + 5.8 * u, y + 5.8 * u, lw * 1.3, c);
+        break;
+    case 'back':
+        // the speller's delete key: a left arrow
+        r.line(x - 5 * u, y, x + 6 * u, y, lw, c);
+        r.tris([x - 7 * u, y, x - 2.5 * u, y - 4.2 * u, x - 2.5 * u, y + 4.2 * u], c);
+        break;
+    case 'close':
+        r.line(x - 4.5 * u, y - 4.5 * u, x + 4.5 * u, y + 4.5 * u, lw, c);
+        r.line(x + 4.5 * u, y - 4.5 * u, x - 4.5 * u, y + 4.5 * u, lw, c);
+        break;
+    default:
+        r.circle(x, y, 2.6 * u, c);
+    }
+}
+
+/** A map button (zoom, back to the car ...): an iDrive 7 tile, rounded square, white line glyph. */
+function roundButton(r, x, y, rr, t, glyphName, dim) {
+    const q = rr * 0.32;
+    r.roundRect(x - rr, y - rr + 2, rr * 2, rr * 2, q, '#00000055');
+    r.card(x - rr, y - rr, rr * 2, rr * 2, q, [[0, withAlpha(ID7.panelTop, 0.94)], [1, withAlpha(ID7.panelBottom, 0.94)]]);
+    r.fillRect(x - rr + q, y - rr, rr * 2 - q * 2, 1, withAlpha('#ffffff', 0.13));
+    r.strokeRoundRect(x - rr, y - rr, rr * 2, rr * 2, q, 1, withAlpha('#ffffff', 0.08));
     const c = dim ? withAlpha('#ffffff', 0.4) : '#ffffff', u = rr / 22;
-    if (glyph === '+') { r.line(x - 9 * u, y, x + 9 * u, y, 3.2 * u, c); r.line(x, y - 9 * u, x, y + 9 * u, 3.2 * u, c); } else if (glyph === '-') r.line(x - 9 * u, y, x + 9 * u, y, 3.2 * u, c);
-    else if (glyph === 'locate') { r.arc(x, y, 7 * u, 9.5 * u, 0, 360, c); r.circle(x, y, 3.4 * u, t.accent2 || c); r.line(x, y - 14 * u, x, y - 10 * u, 2.4 * u, c); r.line(x, y + 10 * u, x, y + 14 * u, 2.4 * u, c); r.line(x - 14 * u, y, x - 10 * u, y, 2.4 * u, c); r.line(x + 10 * u, y, x + 14 * u, y, 2.4 * u, c); }
+    if (glyphName === '+') { r.line(x - 8 * u, y, x + 8 * u, y, 2.4 * u, c); r.line(x, y - 8 * u, x, y + 8 * u, 2.4 * u, c); } else if (glyphName === '-') r.line(x - 8 * u, y, x + 8 * u, y, 2.4 * u, c);
+    else if (glyphName === 'locate') {
+        // BMW's "to the car": an arrowhead pointing up-right
+        r.tris([x + 8 * u, y - 8 * u, x - 8 * u, y - 1 * u, x - 0.5 * u, y + 0.5 * u], c);
+        r.tris([x + 8 * u, y - 8 * u, x - 0.5 * u, y + 0.5 * u, x + 1 * u, y + 8 * u], withAlpha(c, 0.7));
+    }
 }
 
-/** The compass: a needle showing north (red half), with N/H for north-up / heading-up. */
+/** The compass: a tile with a needle showing north (red half), and N or the heading-up mark. */
 function compass(r, x, y, rr, headingDeg, headUp) {
-    r.circle(x, y + 2, rr + 2, '#00000055');
-    r.circle(x, y, rr, withAlpha('#14181e', 0.92));
-    r.arc(x, y, rr - 1.5, rr, 0, 360, withAlpha('#ffffff', 0.22));
-    const a = -headingDeg * Math.PI / 180, l = rr * 0.62, ww = rr * 0.2;
+    roundButton(r, x, y, rr, {}, '');
+    const a = -headingDeg * Math.PI / 180, l = rr * 0.6, ww = rr * 0.17;
     const ux = Math.sin(a), uy = -Math.cos(a), nx = -uy, ny = ux;
-    r.tris([x + ux * l, y + uy * l, x + nx * ww, y + ny * ww, x - nx * ww, y - ny * ww], '#e1001a');
+    r.tris([x + ux * l, y + uy * l, x + nx * ww, y + ny * ww, x - nx * ww, y - ny * ww], '#e2231a');
     r.tris([x - ux * l, y - uy * l, x + nx * ww, y + ny * ww, x - nx * ww, y - ny * ww], '#d8dde3');
-    r.circle(x + rr * 0.78, y - rr * 0.62, rr * 0.36, '#2f8cff');
-    r.text(headUp ? 'H' : 'N', x + rr * 0.78, y - rr * 0.62 + rr * 0.15, rr * 0.4, '#ffffff', { literal: true, font: 'bold', align: 'center' });
+    const bx = x + rr * 0.74, by = y - rr * 0.74;
+    r.circle(bx, by, rr * 0.36, ID7.blue);
+    r.text(headUp ? 'H' : 'N', bx, by + rr * 0.15, rr * 0.4, '#ffffff', { literal: true, font: 'bold', align: 'center' });
 }
 
-module.exports = { arrow, sli, roundButton, compass, phrase, fmtDist, fmtDur, clock, tr, TXT };
+module.exports = { arrow, sli, roundButton, compass, panel, distBar, glyph, ID7, phrase, fmtDist, fmtDur, clock, tr, TXT };

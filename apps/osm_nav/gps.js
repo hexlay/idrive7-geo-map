@@ -165,11 +165,23 @@ class Position {
     _watchGnss() {
         if (this.gnssSubs || !this.cfg.length || !this.ctx.signals) return;
         this.gnssSubs = [];
+        // one subscription per interface and instance, however many of its fields are named
+        const groups = {};
         this.cfg.forEach((c) => {
             const iface = c.iface || c.interface, field = c.field || c.attribute;
             if (!iface || !field) return;
-            const h = {};
-            h[field] = (v) => {
+            const key = iface + '/' + (c.instance || '1');
+            const gr = groups[key] || (groups[key] = { iface, instance: c.instance || '1', h: {} });
+            if (gr.h[field]) return;                  // (named twice: app.json and the install's discovery)
+            gr.h[field] = (v) => {
+                // the fix is good: c.valid a flag that must be true (currentLocation.coordinatesValid), c.fix an
+                // enum that must not say NO_FIX (rawPositionData.fixType: NO_FIX, FIX_1D, FIX_2D, FIX_3D)
+                if (c.valid) { const ok = dig(v, c.valid); if (!(ok === true || ok === 1 || ok === 'true')) return; }
+                if (c.fix) {
+                    let fx = dig(v, c.fix);
+                    if (fx && typeof fx === 'object') fx = fx.name !== undefined ? fx.name : fx.value;
+                    if (fx == null || /NO_FIX|FIX_1D/i.test(String(fx)) || fx === 0 || fx === 1 || fx === '0' || fx === '1') return;
+                }
                 const sc = c.scale || {};
                 let lat, lon, hd, sp;
                 if (!c.lat || c.lat === 'auto') {
@@ -187,13 +199,39 @@ class Position {
                     sp = c.speed ? Number(dig(v, c.speed)) * (sc.speed || 1) : null;
                 }
                 if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
-                const p = merc(lat, lon);
-                this.gnss = { x: p[0], y: p[1], heading: isFinite(hd) ? hd : null, speed: isFinite(sp) ? sp : null, at: Date.now() };
+                const p = merc(lat, lon), now = Date.now(), prev = this.gnss;
+                if (!this.gnssSaid) { this.gnssSaid = true; this.log.info('position: first car fix from ' + iface.split('.').pop() + '.' + field); }
+                let own = isFinite(hd) && hd !== null ? ((hd % 360) + 360) % 360 : null;
+                // the car's heading is used only while it drives (parked, a GNSS heading means nothing), and not at all
+                // once it has kept disagreeing with the way the fixes move (its unit or sense not what is assumed here)
+                const carV = this.live && typeof this.live.speed === 'number' ? this.live.speed : (isFinite(sp) && sp !== null ? sp : null);
+                if (own !== null && prev && carV !== null && carV > 15) {
+                    const moved = Math.hypot(p[0] - prev.x, p[1] - prev.y) * groundScale(p[1]);
+                    if (moved > 12 && moved < 200) {
+                        const off = Math.abs(turnAngle(bearing(p[0] - prev.x, p[1] - prev.y), own));
+                        this.hdCheck = this.hdCheck || { good: 0, bad: 0 };
+                        if (off > 60) this.hdCheck.bad++; else this.hdCheck.good++;
+                        if (!this.hdDistrust && this.hdCheck.bad >= 5 && this.hdCheck.bad > this.hdCheck.good * 2) {
+                            this.hdDistrust = true;
+                            this.log.warn('position: the car\'s heading (' + iface.split('.').pop() + '.' + field + ') keeps disagreeing with the way the car moves: not used');
+                        }
+                    }
+                }
+                if (this.hdDistrust || carV === null || carV < 5) own = null;
+                // a field without a heading (currentLocation) keeps the one the other field gave a moment ago
+                const heading = own !== null ? own : !this.hdDistrust && prev && prev.heading != null && now - prev.at < 3000 ? prev.heading : null;
+                this.gnss = { x: p[0], y: p[1], heading, speed: isFinite(sp) && sp !== null ? sp : null, at: now };
                 this.carSeen = true;
                 this._wake();
             };
-            this.ctx.signals.watch(iface, c.instance || '1', h, this.log)
-                .then((s) => { this.gnssSubs && this.gnssSubs.push(s); this.log.info('position: ' + iface + '.' + field + (s.error ? ' error: ' + s.error : ' subscribed')); });
+        });
+        Object.keys(groups).forEach((key) => {
+            const gr = groups[key], names = Object.keys(gr.h).join(', ');
+            this.ctx.signals.watch(gr.iface, gr.instance, gr.h, this.log).then((s) => {
+                if (!this.gnssSubs) { try { s.shutdown(); } catch (e) { /* stopped meanwhile */ } return; }
+                this.gnssSubs.push(s);
+                this.log.info('position: ' + gr.iface + ' (' + names + ')' + (s.error ? ' error: ' + s.error : ' subscribed'));
+            }).catch((e) => this.log.warn('position: ' + gr.iface + ': ' + e));
         });
     }
 
@@ -279,8 +317,11 @@ class Position {
         this.prevG = { x: g.x, y: g.y };
         const s = R.snap(g.x, g.y, heading, 45);
         if (s && s.dist < 30) {
+            // carried on along the road for the time since the fix (a fix a second: no jump of a car length each one)
             this.dr = { edge: s.edge, t: s.t, heading: s.bearing, at: now };
-            return this._onEdge(s.edge, s.t, sp, 'gnss', heading);
+            const ahead = Math.min(2.5, Math.max(0, (now - g.at) / 1000)) * sp / 3.6;
+            if (ahead > 0.2) this._advance(this.dr, ahead);
+            return this._onEdge(this.dr.edge, this.dr.t, sp, 'gnss', heading);
         }
         return { x: g.x, y: g.y, heading: heading || 0, speed: sp, gLong: this.live.gLong, gLat: this.live.gLat, gear: this.live.gear, source: 'gnss', quality: 'raw', edge: -1, t: 0 };
     }

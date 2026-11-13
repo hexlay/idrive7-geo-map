@@ -1,8 +1,8 @@
 {
   "id": "osm_nav",
   "title": "Navigation",
-  "description": "Offline OpenStreetMap navigation for Georgia (Georgian and English) in place of the BMW map: GPU map at 60 fps, turn-by-turn guidance, speed limits, and the console's NAV button",
-  "version": "1.0.3",
+  "description": "Offline OpenStreetMap navigation for Georgia (Georgian and English) in place of the BMW map, in iDrive 7's own look: GPU map in the BMW map's style, the car's own menus and lists, turn-by-turn guidance, the next turn on the head-up display (with cluster-render), the car's GPS where the firmware gives it, speed limits, and the console's NAV button. Experimental: not tested in a car.",
+  "version": "1.1.0",
   "vendor": "custom",
   "loggingId": "OANV",
   "iconGlyph": "nav",
@@ -22,6 +22,8 @@
   "mguHmi": [
     "ID7"
   ],
+  "nativeSettingsComment": "nativeSettings: the settings open as the HMI's own list (BMW's look and focus) also where the kit runs the screen; NAV_MENU and NAV_LIST are native lists too (setting \"menus\"): while one is open the drawn screen hides and the controller is the HMI's.",
+  "nativeSettings": true,
   "maxDiskUsage": 268435456,
   "mapsComment": "The map, kept out of git (hexlay/idrive7-geo-map-data releases): kit/tools/build.py downloads it (once, into kit/tools/.osm-cache), checks its size and SHA-256 and puts it into the package unpacked. A new map: a new release there and its numbers here.",
   "maps": [
@@ -54,6 +56,32 @@
       "statusRangeTankStatus": "rs",
       "statusBordcomputerAverage": "rs",
       "_optional": "fuel level and range: range on arrival, fuel stops and the low-fuel button"
+    },
+    "de.bmw.infotainment.navigation.positioning.Positioning": {
+      "_optional": "the car's own position (its navigation's fix: GNSS with the car's dead reckoning); firmware without it installs and runs on dead reckoning alone",
+      "_instances": "Main_Instance",
+      "currentLocation": "rs",
+      "rawPositionData": "rs"
+    },
+    "de.bmw.infotainment.navigation.guiding.Guidance": {
+      "_optional": "HUD turn arrows give way while BMW's own navigation guides (read only)",
+      "_instances": "Main_Instance",
+      "guidanceState": "rs"
+    },
+    "de.bmw.infotainment.a4a.carplay.CarPlayManager": {
+      "_optional": "HUD turn arrows give way while CarPlay guides (read only)",
+      "_instances": "CarPlayManagerInst1",
+      "projectedGuidanceActive": "rs"
+    },
+    "de.bmw.infotainment.sdi.aap.androidautoprojectedmanager.AndroidAutoProjectedManager": {
+      "_optional": "HUD turn arrows give way while Android Auto guides (read only)",
+      "_instances": "AndroidAutoProjectedManagerInst1",
+      "projectedGuidanceActive": "rs"
+    },
+    "de.bmw.infotainment.displaydataserver.DisplayDataServer": {
+      "_optional": "HUD turn arrows give way while cruise control shows on the HUD (read only)",
+      "_instances": "1",
+      "functionalLibraryData": "rs"
     }
   },
   "screens": [
@@ -69,6 +97,258 @@
         [
           "BTN_SETTINGS",
           "Settings"
+        ]
+      ]
+    },
+    {
+      "name": "NAV_MENU",
+      "kind": "menu",
+      "title": "Navigation",
+      "items": [
+        [
+          "button",
+          "NM_SEARCH",
+          "Enter destination"
+        ],
+        [
+          "tworow",
+          "NM_HOME",
+          "Home",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_WORK",
+          "Work",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_FAVS",
+          "Favourites",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_RECENT",
+          "Recent destinations",
+          ""
+        ],
+        [
+          "button",
+          "NM_POI",
+          "Points of interest"
+        ],
+        [
+          "tworow",
+          "NM_ROUTE",
+          "Route",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_FUELSTOP",
+          "Fuel stop",
+          ""
+        ],
+        [
+          "button",
+          "NM_STOP",
+          "Stop guidance"
+        ],
+        [
+          "tworow",
+          "NM_AVOID",
+          "Route preference",
+          ""
+        ],
+        [
+          "button",
+          "NM_DEMO",
+          "Start the demo tour"
+        ],
+        [
+          "tworow",
+          "NM_HUD",
+          "Turn arrows on the HUD",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_POS",
+          "Position",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_FUEL",
+          "Fuel",
+          ""
+        ],
+        [
+          "tworow",
+          "NM_STOCK",
+          "Open in place of the BMW map",
+          ""
+        ],
+        [
+          "button",
+          "NM_STOCK_FORGET",
+          "Forget the BMW map"
+        ],
+        [
+          "tworow",
+          "NM_NAVBTN",
+          "Console NAV button",
+          ""
+        ],
+        [
+          "button",
+          "NM_NAVBTN_FORGET",
+          "Forget the NAV button"
+        ],
+        [
+          "tworow",
+          "NM_MAP",
+          "Installed map",
+          ""
+        ],
+        [
+          "button",
+          "NM_CLEAR",
+          "Clear recent destinations"
+        ]
+      ]
+    },
+    {
+      "name": "NAV_LIST",
+      "kind": "menu",
+      "title": "Navigation",
+      "items": [
+        [
+          "tworow",
+          "NL_0",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_1",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_2",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_3",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_4",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_5",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_6",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_7",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_8",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_9",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_10",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_11",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_12",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_13",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_14",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_15",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_16",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_17",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_18",
+          " ",
+          ""
+        ],
+        [
+          "tworow",
+          "NL_19",
+          " ",
+          ""
+        ],
+        [
+          "button",
+          "NL_MORE",
+          "More"
         ]
       ]
     }
@@ -213,11 +493,68 @@
       ]
     },
     {
+      "key": "hudArrows",
+      "label": "Turn arrows on the HUD",
+      "type": "choice",
+      "default": "near",
+      "options": [
+        [
+          "near",
+          "Within 1 km of a turn"
+        ],
+        [
+          "route",
+          "Whole route"
+        ],
+        [
+          "off",
+          "Off"
+        ]
+      ]
+    },
+    {
+      "key": "hudCruise",
+      "label": "HUD arrows and cruise control",
+      "type": "choice",
+      "default": "yield",
+      "options": [
+        [
+          "yield",
+          "Give way to cruise control"
+        ],
+        [
+          "keep",
+          "Keep the arrows (hides the cruise readout on some cars)"
+        ]
+      ]
+    },
+    {
+      "key": "menus",
+      "label": "Menus",
+      "type": "choice",
+      "default": "native",
+      "options": [
+        [
+          "native",
+          "iDrive lists (native)"
+        ],
+        [
+          "drawn",
+          "Drawn (if the lists show no Georgian letters)"
+        ]
+      ]
+    },
+    {
       "key": "theme",
       "label": "Colour theme",
       "type": "choice",
-      "default": "m_tricolour",
+      "default": "idrive",
+      "reset": 1,
       "options": [
+        [
+          "idrive",
+          "iDrive Blue"
+        ],
         [
           "m_tricolour",
           "M Tricolour"
@@ -310,8 +647,26 @@
     }
   ],
   "config": {
-    "comment": "positioning: the car's own GNSS / navigation position, when known for this firmware (run deploy/car/nav-recon.sh on the car to find it). Each entry: { iface, instance, field, lat, lon, heading, speed (dotted paths into the field's value), scale: { lat, lon, heading, speed } (multipliers to degrees / km/h) }. Add the interface to \"signals\" too, with \"_optional\". Empty: speed and turn rate along the roads (dead reckoning) from the last position or one set on the map.",
-    "positioning": [],
+    "comment": "positioning: the car's own position. Each entry: { iface, instance, field, lat, lon, heading, speed (dotted paths into the field's value), valid (a flag that must be true), fix (an enum that must not be NO_FIX / FIX_1D), scale: { lat, lon, heading, speed } (multipliers to degrees / km/h) }; the interface is in \"signals\" too, with \"_optional\". The two below are the navigation's Positioning service, as nhocleopro/hud-widgets read it on a BMW X3 G01 LCI (L18_22w10.5, 2026-11-12: a valid FIX_3D about 9 m from a phone's GPS, parked); not yet seen on this app's target cars. Between fixes, and with none: speed and turn rate along the roads (dead reckoning).",
+    "positioning": [
+      {
+        "iface": "de.bmw.infotainment.navigation.positioning.Positioning",
+        "instance": "Main_Instance",
+        "field": "rawPositionData",
+        "lat": "position.latitude",
+        "lon": "position.longitude",
+        "heading": "heading",
+        "fix": "fixType"
+      },
+      {
+        "iface": "de.bmw.infotainment.navigation.positioning.Positioning",
+        "instance": "Main_Instance",
+        "field": "currentLocation",
+        "lat": "latitude",
+        "lon": "longitude",
+        "valid": "coordinatesValid"
+      }
+    ],
     "reverseGuardComment": "reverseGuard: while the car's gear selector is in reverse (VehicleInformation statusGearboxDrive / DataPowerTrain2, read only) nothing opens Navigation, and a shown Navigation gives its picture and the controller back to the HMI, which shows its camera as without the app. It does not depend on the camera's surface ids (mgu-render.conf yield_surfaces), which are still asked as well. false: the gear is not asked.",
     "reverseGuard": true,
     "navButtonComment": "navButton: what the console's NAV button sends, so pressing it opens this app on top of the stock screen. The HMI always gets the button too (nothing is blocked): with this app not running, NAV works as stock. Two sources: the controller gate's read-only button feed (mgu-inputgate.so built from kit/renderd/inputgate, and /var/opt/mgu-inputgate/buttons, which the installer creates), or a SOME/IP field: iface + field from deploy/car/nav-recon.sh (add it to signals with _optional). match: byte pattern in hex, xx for a byte that changes (a counter), e.g. \"xx 01 a4 xx\"; the Route page can learn it (press NAV three times). Empty: learn on the car.",

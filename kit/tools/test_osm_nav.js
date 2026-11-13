@@ -139,6 +139,40 @@ assert(close(pos._autoScale(41.6934, 44.8015, 'deg'), 41.6934, 44.8015), 'degree
 assert(close(pos._autoScale(416934000, 448015000, 'e7'), 41.6934, 44.8015), '1e-7 degrees');
 assert(close(pos._autoScale(Math.round(41.6934 * 2147483648 / 180), Math.round(44.8015 * 2147483648 / 180), 'semi'), 41.6934, 44.8015), 'semicircles (not taken for 1e-7 degrees)');
 assert.strictEqual(pos._autoScale(48.85, 2.35, 'paris'), null, 'a fix on no installed map: not used');
+// the navigation's Positioning service (app.json config.positioning, the field layout hud-widgets read on an X3)
+{
+    const cfg = require(path.join(APP, 'app.json')).config;
+    const watched = [];
+    const pctx = Object.assign({}, ctx, { spec: { config: cfg }, signals: { watch: (iface, inst, h) => { watched.push({ iface, inst, h }); return Promise.resolve({ shutdown() {} }); } } });
+    const pp = new Position(pctx, { pack, router, packs: () => [pack], route: () => null });
+    pp._watchGnss();
+    assert.strictEqual(watched.length, 1, 'one subscription for both Positioning fields');
+    const w = watched[0];
+    assert.strictEqual(w.iface, 'de.bmw.infotainment.navigation.positioning.Positioning');
+    assert.strictEqual(w.inst, 'Main_Instance');
+    assert(w.h.rawPositionData && w.h.currentLocation, 'rawPositionData and currentLocation');
+    pp.live = { speed: 40, at: Date.now() };          // driving: the car's heading is used (parked it is not)
+    w.h.rawPositionData({ fixType: 'NO_FIX', heading: 10, position: { latitude: 41.7, longitude: 44.8 } });
+    assert.strictEqual(pp.gnss, null, 'NO_FIX: not used');
+    w.h.currentLocation({ coordinatesValid: false, latitude: 41.7, longitude: 44.8 });
+    assert.strictEqual(pp.gnss, null, 'coordinatesValid false: not used');
+    w.h.rawPositionData({ fixType: { name: 'FIX_3D' }, heading: 95.5, position: { latitude: 41.6934, longitude: 44.8015 } });
+    const m0 = merc(41.6934, 44.8015);
+    assert(pp.gnss && Math.abs(pp.gnss.x - m0[0]) < 0.01 && Math.abs(pp.gnss.y - m0[1]) < 0.01 && pp.gnss.heading === 95.5, 'FIX_3D: the fix and its heading');
+    w.h.currentLocation({ coordinatesValid: true, heightValid: false, latitude: 41.6935, longitude: 44.8016 });
+    assert(pp.gnss.heading === 95.5 && Math.abs(pp.gnss.y - merc(41.6935, 44.8016)[1]) < 0.01, 'currentLocation: its fix, the heading kept from rawPositionData');
+    // parked: a fix, but not its heading
+    pp.live = { speed: 0, at: Date.now() }; pp.gnss = null;
+    w.h.rawPositionData({ fixType: 'FIX_3D', heading: 200, position: { latitude: 41.6934, longitude: 44.8015 } });
+    assert(pp.gnss && pp.gnss.heading === null, 'parked: the fix without its heading');
+    // a heading that keeps disagreeing with the way the fixes move (driving north, the field says south): no longer used
+    pp.live = { speed: 50, at: Date.now() };
+    for (let i = 1; i <= 7; i++) w.h.rawPositionData({ fixType: 'FIX_3D', heading: 180, position: { latitude: 41.6934 + i * 0.0002, longitude: 44.8015 } });
+    assert(pp.hdDistrust, 'the disagreeing heading is distrusted');
+    w.h.rawPositionData({ fixType: 'FIX_3D', heading: 180, position: { latitude: 41.6934 + 8 * 0.0002, longitude: 44.8015 } });
+    assert(pp.gnss.heading !== 180, 'and not used');
+    pp.stop();
+}
 // the demo drive: never by itself on the car (MainApp: ctx.app), only off the car or when chosenconst demoCtx = (app, mode) => ({ app, previewDemo: true, log: ctx.log, dataDir: os.tmpdir(), spec: { config: {} }, settings: { get: () => mode }, ui: { isVisible: () => true } });const mk = (app, mode) => new Position(demoCtx(app, mode), { pack, router, packs: () => [pack], route: () => null });assert.strictEqual(mk({ on() {} }, 'auto').wantDemo(), false, 'on the car, auto: no demo drive (no position instead)');assert.strictEqual(mk(null, 'auto').wantDemo(), true, 'PC preview, auto: the demo drive');assert.strictEqual(mk({ on() {} }, 'on').wantDemo(), true, 'on the car, chosen in Settings: the demo drive');
 
 // ---- the stock BMW map: Navigation opens in its place, never a loop after BACK, never over the camera ----
